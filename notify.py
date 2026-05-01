@@ -480,8 +480,14 @@ def main():
         if response:
             reply_text = interaction.parse_reply(response["reply"], pending)
             hook_output = interaction.format_hook_response(reply_text)
-            print(hook_output, flush=True)
-            log(f"交互响应: channel={response.get('channel','?')} reply={response['reply']!r} → {hook_output!r}")
+            log(f"交互响应: channel={response.get('channel','?')} reply={response['reply']!r} → parsed={reply_text!r} → stdout={hook_output!r}")
+            sys.stdout.write(hook_output + "\n")
+            sys.stdout.flush()
+            # 双重保险：直接写文件描述符
+            try:
+                os.write(1, (hook_output + "\n").encode("utf-8"))
+            except Exception:
+                pass
 
             # 向回复渠道发送确认反馈
             resp_channel = response.get("channel", "")
