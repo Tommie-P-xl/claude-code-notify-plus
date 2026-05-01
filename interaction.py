@@ -260,6 +260,23 @@ def cleanup_all():
             pass
 
 
+def cleanup_stale(max_age_seconds: int = 3600):
+    """清理超过 max_age_seconds 秒的 pending 请求（默认 1 小时）"""
+    _ensure_dirs()
+    now = time.time()
+    for f in PENDING_DIR.glob("*.json"):
+        try:
+            req = json.loads(f.read_text(encoding="utf-8"))
+            created = req.get("created_at", 0)
+            if now - created > max_age_seconds:
+                f.unlink()
+                # 同时清理对应的 response 文件
+                resp = RESPONSE_DIR / f"{req.get('id', '')}.json"
+                resp.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 # ── 响应处理 ────────────────────────────────────────────
 
 def write_response(request_id: str, reply: str, channel: str) -> bool:
