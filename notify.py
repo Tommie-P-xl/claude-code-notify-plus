@@ -317,27 +317,21 @@ def _extract_options(ctx: dict) -> dict:
                 "question": q.get("question", ""),
             }
 
-    # PermissionRequest: 提取 permission_suggestions 中的实际选项
+    # PermissionRequest: 使用 Claude Code 标准的 3 个选项
     if hook_event == "PermissionRequest":
         suggestions = ctx.get("permission_suggestions", [])
         log(f"permission_suggestions: {json.dumps(suggestions, ensure_ascii=False)[:300]}")
-        if suggestions and isinstance(suggestions, list):
-            options = []
-            for s in suggestions:
-                if isinstance(s, dict):
-                    label = s.get("label", "")
-                    desc = s.get("description", "")
-                    options.append(label if label else desc)
-                elif isinstance(s, str):
-                    options.append(s)
-            if options:
-                return {
-                    "options": options,
-                    "option_type": "permission_select",
-                    "multi_select": False,
-                    "allow_custom": False,
-                    "question": "",
-                }
+        return {
+            "options": [
+                "Yes",
+                "Yes, allow all edits during this session",
+                "No",
+            ],
+            "option_type": "permission_select",
+            "multi_select": False,
+            "allow_custom": False,
+            "question": "",
+        }
 
     return {
         "options": [],
