@@ -295,6 +295,7 @@ def _extract_options(ctx: dict) -> dict:
     """从 hook 上下文中提取选项信息"""
     tool_name = ctx.get("tool_name", "")
     tool_input = ctx.get("tool_input", {})
+    hook_event = ctx.get("hook_event_name", ctx.get("hookEvent", ""))
     if not isinstance(tool_input, dict):
         tool_input = {}
 
@@ -315,6 +316,28 @@ def _extract_options(ctx: dict) -> dict:
                 "allow_custom": True,
                 "question": q.get("question", ""),
             }
+
+    # PermissionRequest: 提取 permission_suggestions 中的实际选项
+    if hook_event == "PermissionRequest":
+        suggestions = ctx.get("permission_suggestions", [])
+        log(f"permission_suggestions: {json.dumps(suggestions, ensure_ascii=False)[:300]}")
+        if suggestions and isinstance(suggestions, list):
+            options = []
+            for s in suggestions:
+                if isinstance(s, dict):
+                    label = s.get("label", "")
+                    desc = s.get("description", "")
+                    options.append(label if label else desc)
+                elif isinstance(s, str):
+                    options.append(s)
+            if options:
+                return {
+                    "options": options,
+                    "option_type": "permission_select",
+                    "multi_select": False,
+                    "allow_custom": False,
+                    "question": "",
+                }
 
     return {
         "options": [],
@@ -459,8 +482,18 @@ def main():
         if response:
             reply_text = interaction.parse_reply(response["reply"], pending)
             hook_output = interaction.format_hook_response(reply_text)
-            print(hook_output)
+            print(hook_output, flush=True)
             log(f"交互响应: channel={response.get('channel','?')} reply={response['reply']!r} → {hook_output!r}")
+
+            # 向回复渠道发送确认反馈
+            resp_channel = response.get("channel", "")
+            if resp_channel in ("weixin", "qq"):
+                feedback_msg = f"已收到回复: {response['reply']}（{hook_output}）"
+                for ch in channels:
+                    if ch.is_enabled() and ch.name == resp_channel:
+                        ch.send("Claude Code - 回复确认", feedback_msg)
+                        log(f"[{ch.name}] 发送反馈: {feedback_msg}")
+                        break
         else:
             log("等待用户响应超时")
 

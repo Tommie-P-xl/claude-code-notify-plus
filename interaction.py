@@ -58,6 +58,7 @@ def parse_reply(reply: str, pending: dict) -> str:
     """
     解析用户回复，返回要输出给 Claude Code 的文本。
     - PermissionRequest: "approve" / "deny" / 自由文本
+    - permission_select: 按选项列表映射
     - Elicitation 单选: 选项文本 / 自定义文本
     - Elicitation 多选: 逗号分隔的选项文本
     """
@@ -73,12 +74,30 @@ def parse_reply(reply: str, pending: dict) -> str:
             return "deny"
         return reply
 
+    if option_type == "permission_select":
+        return _parse_permission_select(reply, options)
+
     if option_type in ("single_select", ""):
         return _parse_single_select(reply, options, pending.get("allow_custom", False))
 
     if option_type == "multi_select":
         return _parse_multi_select(reply, options)
 
+    return reply
+
+
+def _parse_permission_select(reply: str, options: list) -> str:
+    """解析权限选择回复，按选项列表映射"""
+    if reply.isdigit():
+        idx = int(reply) - 1
+        if 0 <= idx < len(options):
+            return options[idx]
+    # 非数字或超出范围，尝试关键词匹配
+    low = reply.lower()
+    if low in _APPROVE_KEYWORDS:
+        return options[0] if options else "approve"
+    if low in _DENY_KEYWORDS:
+        return options[-1] if options else "deny"
     return reply
 
 
@@ -295,6 +314,17 @@ def format_notification_message(pending: dict) -> str:
         lines.append("")
         lines.append("  1 - 批准")
         lines.append("  2 - 拒绝")
+        lines.append("")
+        lines.append(f"回复: {label} 1（字母为请求编号，数字为选项）")
+
+    elif option_type == "permission_select":
+        title = f"审批请求 #{label}"
+        lines.append(f"【Claude Code - {title}】")
+        if context:
+            lines.append(context)
+        lines.append("")
+        for i, opt in enumerate(options, 1):
+            lines.append(f"  {i} - {opt}")
         lines.append("")
         lines.append(f"回复: {label} 1（字母为请求编号，数字为选项）")
 
