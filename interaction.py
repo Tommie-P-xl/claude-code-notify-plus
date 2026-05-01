@@ -327,9 +327,11 @@ def read_response(request_id: str) -> Optional[dict]:
         return None
 
 
-def format_hook_response(reply_text: str, hook_event: str = "", question: str = "") -> str:
+def format_hook_response(reply_text: str, hook_event: str = "", question: str = "", tool_input: dict = None) -> str:
     """将解析后的回复文本格式化为 hook stdout JSON 输出"""
     import json as _json
+    if tool_input is None:
+        tool_input = {}
 
     if hook_event == "PermissionRequest":
         decision = reply_text.strip().lower()
@@ -364,14 +366,19 @@ def format_hook_response(reply_text: str, hook_event: str = "", question: str = 
 
     if hook_event == "Elicitation":
         field_name = question if question else "response"
+        updated_input = {
+            "answers": {field_name: reply_text.strip()}
+        }
+        # Echo back the original questions array (Claude Code needs it)
+        questions = tool_input.get("questions", [])
+        if questions:
+            updated_input["questions"] = questions
         return _json.dumps({
             "hookSpecificOutput": {
                 "hookEventName": "PermissionRequest",
                 "decision": {
                     "behavior": "allow",
-                    "updatedInput": {
-                        "answers": {field_name: reply_text.strip()}
-                    }
+                    "updatedInput": updated_input
                 }
             }
         })

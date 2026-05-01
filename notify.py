@@ -490,7 +490,7 @@ def main():
             reply_text = interaction.parse_reply(response["reply"], pending)
             # AskUserQuestion 触发的是 PermissionRequest 事件，但需要按 Elicitation 格式输出
             output_event = "Elicitation" if pending.get("as_elicitation") else hook_event
-            hook_output = interaction.format_hook_response(reply_text, output_event, pending.get("question", ""))
+            hook_output = interaction.format_hook_response(reply_text, output_event, pending.get("question", ""), pending.get("tool_input", {}))
             log(f"交互响应: channel={response.get('channel','?')} reply={response['reply']!r} → parsed={reply_text!r} → stdout={hook_output!r}")
             print(hook_output, flush=True)
 
