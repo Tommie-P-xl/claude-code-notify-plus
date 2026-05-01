@@ -86,18 +86,33 @@ def parse_reply(reply: str, pending: dict) -> str:
     return reply
 
 
+# PermissionRequest 选项 → Claude Code 决策关键词映射
+_PERMISSION_DECISION_MAP = {
+    "approve": {"approve", "yes", "y", "是", "批准", "ok", "好", "同意", "1"},
+    "approve_all": {"approve_all", "allow_all", "allow all", "yes, allow all", "2"},
+    "deny": {"deny", "no", "n", "否", "拒绝", "不", "不同意", "3"},
+}
+
+
 def _parse_permission_select(reply: str, options: list) -> str:
-    """解析权限选择回复，按选项列表映射"""
-    if reply.isdigit():
-        idx = int(reply) - 1
-        if 0 <= idx < len(options):
-            return options[idx]
-    # 非数字或超出范围，尝试关键词匹配
-    low = reply.lower()
-    if low in _APPROVE_KEYWORDS:
-        return options[0] if options else "approve"
-    if low in _DENY_KEYWORDS:
-        return options[-1] if options else "deny"
+    """解析权限选择回复，返回 Claude Code 决策关键词: approve / approve_all / deny"""
+    low = reply.strip().lower()
+
+    # 按数字选择: 1=approve, 2=approve_all, 3=deny
+    if reply.strip().isdigit():
+        idx = int(reply.strip()) - 1
+        if idx == 0:
+            return "approve"
+        elif idx == 1:
+            return "approve_all"
+        elif idx == 2:
+            return "deny"
+
+    # 关键词匹配
+    for decision, keywords in _PERMISSION_DECISION_MAP.items():
+        if low in keywords:
+            return decision
+
     return reply
 
 
