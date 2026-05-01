@@ -299,6 +299,7 @@ def _extract_options(ctx: dict) -> dict:
     if not isinstance(tool_input, dict):
         tool_input = {}
 
+    # AskUserQuestion（可能触发 PermissionRequest 或 Elicitation）→ 提取问题选项
     if tool_name == "AskUserQuestion":
         questions = tool_input.get("questions", [])
         if questions:
@@ -315,9 +316,10 @@ def _extract_options(ctx: dict) -> dict:
                 "multi_select": is_multi,
                 "allow_custom": True,
                 "question": q.get("question", ""),
+                "as_elicitation": True,  # 标记为 Elicitation 格式输出
             }
 
-    # PermissionRequest: 使用 Claude Code 标准的 3 个选项
+    # PermissionRequest（真正的权限请求）→ 标准 3 选项
     if hook_event == "PermissionRequest":
         suggestions = ctx.get("permission_suggestions", [])
         log(f"permission_suggestions: {json.dumps(suggestions, ensure_ascii=False)[:300]}")
@@ -331,6 +333,7 @@ def _extract_options(ctx: dict) -> dict:
             "multi_select": False,
             "allow_custom": False,
             "question": "",
+            "as_elicitation": False,
         }
 
     return {
@@ -339,6 +342,7 @@ def _extract_options(ctx: dict) -> dict:
         "multi_select": False,
         "allow_custom": False,
         "question": "",
+        "as_elicitation": False,
     }
 
 
@@ -481,7 +485,9 @@ def main():
         # 输出响应给 Claude Code
         if response:
             reply_text = interaction.parse_reply(response["reply"], pending)
-            hook_output = interaction.format_hook_response(reply_text, hook_event, pending.get("question", ""))
+            # AskUserQuestion 触发的是 PermissionRequest 事件，但需要按 Elicitation 格式输出
+            output_event = "Elicitation" if pending.get("as_elicitation") else hook_event
+            hook_output = interaction.format_hook_response(reply_text, output_event, pending.get("question", ""))
             log(f"交互响应: channel={response.get('channel','?')} reply={response['reply']!r} → parsed={reply_text!r} → stdout={hook_output!r}")
             print(hook_output, flush=True)
 

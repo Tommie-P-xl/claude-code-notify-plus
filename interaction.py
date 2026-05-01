@@ -81,7 +81,7 @@ def parse_reply(reply: str, pending: dict) -> str:
         return _parse_single_select(reply, options, pending.get("allow_custom", False))
 
     if option_type == "multi_select":
-        return _parse_multi_select(reply, options)
+        return _parse_multi_select(reply.replace("，", ","), options)
 
     return reply
 
@@ -460,6 +460,10 @@ def format_terminal_prompt(pending_list: list[dict]) -> str:
 
         if option_type == "approve_deny":
             lines.append(f"  #{label} {context}  [批准/拒绝]{marker}")
+        elif option_type == "permission_select":
+            opts = req.get("options", [])
+            opts_preview = ", ".join(f"{j+1}={o}" for j, o in enumerate(opts[:3]))
+            lines.append(f"  #{label} {context}  [{opts_preview}]{marker}")
         else:
             opts = req.get("options", [])
             opts_preview = ", ".join(f"{j+1}={o}" for j, o in enumerate(opts[:3]))
