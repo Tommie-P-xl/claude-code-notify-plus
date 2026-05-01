@@ -349,9 +349,13 @@ def format_hook_response(reply_text: str, hook_event: str = "", question: str = 
         field_name = question if question else "response"
         return _json.dumps({
             "hookSpecificOutput": {
-                "hookEventName": "Elicitation",
-                "action": "accept",
-                "content": {field_name: reply_text.strip()}
+                "hookEventName": "PermissionRequest",
+                "decision": {
+                    "behavior": "allow",
+                    "updatedInput": {
+                        "answers": {field_name: reply_text.strip()}
+                    }
+                }
             }
         })
 
