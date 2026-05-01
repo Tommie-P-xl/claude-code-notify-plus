@@ -383,8 +383,10 @@ def main():
         return
 
     # --- 正常通知流程 ---
-    # 微信已启用时，确保 keepalive 守护进程在运行
-    if config.get("weixin", {}).get("enabled") and config.get("weixin", {}).get("bot_token"):
+    # 微信或 QQ 已启用时，确保 keepalive 守护进程在运行
+    wx_enabled = config.get("weixin", {}).get("enabled") and config.get("weixin", {}).get("bot_token")
+    qq_enabled = config.get("qq", {}).get("enabled") and config.get("qq", {}).get("app_id")
+    if wx_enabled or qq_enabled:
         try:
             from channels.weixin import start_keepalive
             start_keepalive()
