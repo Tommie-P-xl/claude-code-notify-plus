@@ -174,6 +174,8 @@ def create_request(
     multi_select: bool,
     allow_custom: bool,
     timeout: int,
+    question: str = "",
+    as_elicitation: bool = False,
 ) -> dict:
     """创建 pending 请求，返回 pending dict"""
     _ensure_dirs()
@@ -194,6 +196,8 @@ def create_request(
         "allow_custom": allow_custom,
         "created_at": time.time(),
         "timeout": timeout,
+        "question": question,
+        "as_elicitation": as_elicitation,
     }
 
     pending_file = PENDING_DIR / f"{request_id}.json"

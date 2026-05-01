@@ -464,6 +464,8 @@ def main():
             multi_select=options_info["multi_select"],
             allow_custom=options_info["allow_custom"],
             timeout=config.get("interaction", {}).get("timeout_seconds", 0),
+            question=options_info.get("question", ""),
+            as_elicitation=options_info.get("as_elicitation", False),
         )
 
         # 发送带选项的通知
