@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__filesystem__directory_tree",
+      "Bash(python -c \"import interaction; print\\('OK'\\)\")",
+      "Bash(python -c \"from interaction import create_request, list_requests, get_latest_request, get_request_by_label, cleanup_request, cleanup_all; print\\('All 6 functions imported OK'\\)\")",
+      "Bash(python -c \"from interaction import write_response, read_response, format_hook_response, format_notification_message; print\\('All 4 functions OK'\\)\")",
+      "Bash(python -c \"import notify; print\\('OK'\\)\")",
+      "Bash(python -c \"import weixin_keepalive; print\\('OK'\\)\")",
+      "Bash(python -c \"from app import create_app; print\\('OK'\\)\")",
+      "Bash(python -c \"import interaction; print\\('interaction OK:', [f for f in dir\\(interaction\\) if not f.startswith\\('_'\\)]\\)\")",
+      "Bash(python -c \"import notify; print\\('notify OK'\\)\")",
+      "Bash(python -c \"import weixin_keepalive; print\\('keepalive OK'\\)\")",
+      "Bash(python -c \"from app import create_app; print\\('app OK'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(gh auth *)",
+      "Bash(git init *)",
+      "Bash(git branch *)",
+      "Bash(git add *)"
+    ]
+  }
+}

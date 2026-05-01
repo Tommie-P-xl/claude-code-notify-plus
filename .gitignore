@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+keepalive.pid
+notify.log
+notify_state.json
+config.json
+.omc/
+
+# 交互功能运行时文件
+pending/
+responses/
