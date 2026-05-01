@@ -306,8 +306,42 @@ def read_response(request_id: str) -> Optional[dict]:
         return None
 
 
-def format_hook_response(reply_text: str) -> str:
-    """将解析后的回复文本格式化为 hook stdout 输出"""
+def format_hook_response(reply_text: str, hook_event: str = "") -> str:
+    """将解析后的回复文本格式化为 hook stdout JSON 输出"""
+    import json as _json
+    decision = reply_text.strip().lower()
+
+    if hook_event == "PermissionRequest":
+        if decision == "approve":
+            return _json.dumps({
+                "hookSpecificOutput": {
+                    "hookEventName": "PermissionRequest",
+                    "decision": {"behavior": "allow"}
+                }
+            })
+        elif decision == "approve_all":
+            return _json.dumps({
+                "hookSpecificOutput": {
+                    "hookEventName": "PermissionRequest",
+                    "decision": {
+                        "behavior": "allow",
+                        "updatedPermissions": [{
+                            "type": "setMode",
+                            "mode": "acceptEdits",
+                            "destination": "session"
+                        }]
+                    }
+                }
+            })
+        elif decision == "deny":
+            return _json.dumps({
+                "hookSpecificOutput": {
+                    "hookEventName": "PermissionRequest",
+                    "decision": {"behavior": "deny", "message": "User denied"}
+                }
+            })
+
+    # 其他事件（Elicitation 等）返回纯文本
     return reply_text.strip()
 
 

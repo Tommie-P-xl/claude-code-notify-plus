@@ -481,7 +481,7 @@ def main():
         # 输出响应给 Claude Code
         if response:
             reply_text = interaction.parse_reply(response["reply"], pending)
-            hook_output = interaction.format_hook_response(reply_text)
+            hook_output = interaction.format_hook_response(reply_text, hook_event)
             log(f"交互响应: channel={response.get('channel','?')} reply={response['reply']!r} → parsed={reply_text!r} → stdout={hook_output!r}")
             print(hook_output, flush=True)
 
