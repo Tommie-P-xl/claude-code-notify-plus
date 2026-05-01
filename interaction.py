@@ -307,12 +307,8 @@ def read_response(request_id: str) -> Optional[dict]:
 
 
 def format_hook_response(reply_text: str) -> str:
-    """将解析后的回复文本格式化为 hook stdout JSON 输出"""
-    import json as _json
-    decision = reply_text.strip().lower()
-    if decision in ("approve", "approve_all", "deny"):
-        return _json.dumps({"decision": decision})
-    return _json.dumps({"decision": "approve", "reason": reply_text})
+    """将解析后的回复文本格式化为 hook stdout 输出"""
+    return reply_text.strip()
 
 
 def format_notification_message(pending: dict) -> str:
