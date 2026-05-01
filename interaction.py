@@ -306,12 +306,12 @@ def read_response(request_id: str) -> Optional[dict]:
         return None
 
 
-def format_hook_response(reply_text: str, hook_event: str = "") -> str:
+def format_hook_response(reply_text: str, hook_event: str = "", question: str = "") -> str:
     """将解析后的回复文本格式化为 hook stdout JSON 输出"""
     import json as _json
-    decision = reply_text.strip().lower()
 
     if hook_event == "PermissionRequest":
+        decision = reply_text.strip().lower()
         if decision == "approve":
             return _json.dumps({
                 "hookSpecificOutput": {
@@ -341,7 +341,17 @@ def format_hook_response(reply_text: str, hook_event: str = "") -> str:
                 }
             })
 
-    # 其他事件（Elicitation 等）返回纯文本
+    if hook_event == "Elicitation":
+        field_name = question if question else "response"
+        return _json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": "Elicitation",
+                "action": "accept",
+                "content": {field_name: reply_text.strip()}
+            }
+        })
+
+    # 兜底：纯文本
     return reply_text.strip()
 
 
