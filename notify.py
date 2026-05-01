@@ -426,6 +426,10 @@ def main():
                     log(f"发送通知: tool={ctx.get('tool_name','?')} cmd={cmd_preview!r}")
 
                     context_text = _extract_context_text(ctx)
+                    # 在通知消息前加上工作目录
+                    cwd = ctx.get("cwd", "")
+                    if cwd:
+                        context_text = f"[{cwd}] {context_text}" if context_text else cwd
                     hook_event = ctx.get("hook_event_name", ctx.get("hookEvent", ""))
                     if hook_event in ("Elicitation", "PermissionRequest", "Notification"):
                         hook_type = "ask"
