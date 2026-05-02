@@ -612,13 +612,22 @@ def dingtalk_stream_loop():
             client = DingTalkStreamClient(credential)
 
             class BotHandler(ChatbotHandler):
-                def process(self, message: dingtalk_stream.ChatbotMessage):
+                def process(self, callback_message):
                     try:
+                        # Parse CallbackMessage into ChatbotMessage
+                        message = dingtalk_stream.ChatbotMessage.from_dict(callback_message.data)
+
                         content = ""
-                        if message.text and message.text.content:
+                        # Get text content
+                        if message.text and hasattr(message.text, 'content'):
                             content = message.text.content.strip()
-                        elif message.message_type == "text":
-                            content = str(getattr(message, 'text', '')).strip()
+                        elif isinstance(message.text, str):
+                            content = message.text.strip()
+                        else:
+                            # Try get_text_list
+                            text_list = message.get_text_list()
+                            if text_list:
+                                content = " ".join(text_list).strip()
 
                         sender_id = message.sender_staff_id or message.sender_id or ""
                         log(f"[dingtalk] 收到消息 from {sender_id}: {content[:50]}")
