@@ -137,36 +137,23 @@ def _process_incoming_message(text: str, channel: str):
         return
 
     label, reply = _extract_reply_parts(text)
-    if not reply:
+    if not reply or not label:
         return
 
-    # 找到目标 pending 请求
+    # 找到目标 pending 请求（必须匹配标签）
     target_pending = None
-    if label:
-        for pf in pending_files:
-            try:
-                req = json.loads(pf.read_text(encoding="utf-8"))
-                if req.get("label", "").upper() == label:
-                    target_pending = req
-                    break
-            except Exception:
-                continue
-    if not target_pending:
-        pending_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+    for pf in pending_files:
         try:
-            target_pending = json.loads(pending_files[0].read_text(encoding="utf-8"))
+            req = json.loads(pf.read_text(encoding="utf-8"))
+            if req.get("label", "").upper() == label:
+                target_pending = req
+                break
         except Exception:
-            return
+            continue
 
     if not target_pending:
+        log(f"[{channel}] 未找到标签 #{label} 对应的请求，跳过: {text[:30]}")
         return
-
-    # 防抖：无标签消息在请求创建 3 秒内到达，视为旧消息（微信 getupdates 等渠道可能返回排队的旧消息）
-    if not label:
-        created_at = target_pending.get("created_at", 0)
-        if created_at and (time.time() - created_at) < 3:
-            log(f"[{channel}] 跳过旧消息（请求创建仅 {time.time() - created_at:.1f}s）: {text[:30]}")
-            return
 
     request_id = target_pending["id"]
 
