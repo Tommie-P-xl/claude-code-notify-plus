@@ -635,7 +635,7 @@ def dingtalk_stream_loop():
                     except Exception as e:
                         log(f"[dingtalk] 处理消息异常: {e}")
 
-            client.register_callback_handler(BotHandler())
+            client.register_callback_handler(dingtalk_stream.ChatbotMessage.TOPIC, BotHandler())
             log("[dingtalk] Stream 连接中...")
             client.start_forever()
 
