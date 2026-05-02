@@ -81,13 +81,13 @@ Reply `1` on QQ/WeChat to approve, and the terminal continues automatically.
 └──────────┬────────────────┬────────────────┬────────────────┘
            │                │                │
            ▼                ▼                ▼
-       Terminal CON     WeChat/QQ         Web UI
-       Keyboard input   keepalive daemon   Config management
+       Terminal CON   WeChat/QQ/FS/DT/TG    Web UI
+       Keyboard input   keepalive daemon      Config management
                         Message listening + reply handling
            │                │
            ▼                ▼
     ┌──────────────────────────────┐
-    │    responses/{id}.json       │  ← Three channels compete, atomic write
+    │    responses/{id}.json       │  ← Multi-channel compete, atomic write
     └──────────────────────────────┘
 ```
 
@@ -196,7 +196,7 @@ A yes        → Keyword matching: 是/yes/ok/approve → approve
 
 ### Competition Mechanism
 
-Three channels listen simultaneously, first reply wins. After a reply:
+All channels listen simultaneously, first reply wins. After a reply:
 - Other channels automatically cancel their wait
 - The replying channel receives confirmation feedback (e.g., QQ reply → QQ gets "Reply received")
 - Terminal input doesn't trigger feedback
@@ -214,7 +214,7 @@ When multiple approvals are triggered consecutively, the terminal displays all p
 
   Reply format: <letter> <option>, e.g., "A 1"
   Type "1" to reply to latest request #A
-  All three channels can reply, first wins.
+  All channels can reply, first wins.
 ==================================================
 ```
 

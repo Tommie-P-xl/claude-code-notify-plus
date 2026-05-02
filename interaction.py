@@ -557,7 +557,7 @@ def format_notification_message(pending: dict) -> str:
             lines.append("")
             lines.append(f"回复: {label} 1")
 
-    lines.append("终端/微信/QQ 均可回复，先到先生效。")
+    lines.append("终端/微信/QQ/飞书/钉钉/Telegram 均可回复，先到先生效。")
     return "\n".join(lines)
 
 
@@ -622,7 +622,7 @@ def format_terminal_prompt(pending_list: list[dict]) -> str:
     else:
         lines.append(f'  回复格式: <字母> <选项>，如 "{latest_label} 1"')
         lines.append(f'  直接输入 "1" 回复最新请求 #{latest_label}')
-    lines.append("  三个渠道均可回复，先到先生效。")
+    lines.append("  所有渠道均可回复，先到先生效。")
     lines.append("=" * 50)
     lines.append("请输入: ")
 
