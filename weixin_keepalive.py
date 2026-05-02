@@ -524,6 +524,10 @@ def feishu_websocket_loop():
         log("[feishu] lark-oapi 未安装，跳过飞书监听")
         return
 
+    # 看门狗：记录最近一次收到消息的时间，超时则强制重连
+    last_message_time = time.time()
+    WATCHDOG_TIMEOUT = 300  # 5 分钟无消息则重连
+
     while True:
         cfg = load_config()
         fs = cfg.get("feishu", {})
@@ -534,8 +538,12 @@ def feishu_websocket_loop():
             log("[feishu] 飞书配置不完整，监听退出")
             break
 
+        last_message_time = time.time()  # 重置看门狗
+
         try:
             def on_message(data):
+                nonlocal last_message_time
+                last_message_time = time.time()
                 try:
                     msg = data.event.message
                     sender = data.event.sender
@@ -570,12 +578,25 @@ def feishu_websocket_loop():
                 log_level=lark.LogLevel.WARNING,
             )
             log("[feishu] WebSocket 连接中...")
-            ws_client.start()
+
+            # 在独立线程中启动 WebSocket，主线程运行看门狗
+            ws_thread = threading.Thread(target=ws_client.start, daemon=True)
+            ws_thread.start()
+
+            # 看门狗循环：检测连接是否静默断开
+            while ws_thread.is_alive():
+                time.sleep(10)
+                elapsed = time.time() - last_message_time
+                if elapsed > WATCHDOG_TIMEOUT:
+                    log(f"[feishu] WebSocket 超过 {WATCHDOG_TIMEOUT}s 无消息，强制重连")
+                    break
+            else:
+                log("[feishu] WebSocket 线程已退出，重连中...")
 
         except Exception as e:
             log(f"[feishu] WebSocket 异常: {e}")
-            time.sleep(10)
-            continue
+
+        time.sleep(5)
 
 
 def feishu_thread_entry():
@@ -597,6 +618,9 @@ def dingtalk_stream_loop():
         log("[dingtalk] dingtalk-stream 未安装，跳过钉钉监听")
         return
 
+    last_message_time = time.time()
+    WATCHDOG_TIMEOUT = 300  # 5 分钟无消息则重连
+
     while True:
         cfg = load_config()
         dt = cfg.get("dingtalk", {})
@@ -607,24 +631,25 @@ def dingtalk_stream_loop():
             log("[dingtalk] 钉钉配置不完整，监听退出")
             break
 
+        last_message_time = time.time()
+
         try:
             credential = Credential(client_id, client_secret)
             client = DingTalkStreamClient(credential)
 
             class BotHandler(ChatbotHandler):
                 def process(self, callback_message):
+                    nonlocal last_message_time
+                    last_message_time = time.time()
                     try:
-                        # Parse CallbackMessage into ChatbotMessage
                         message = dingtalk_stream.ChatbotMessage.from_dict(callback_message.data)
 
                         content = ""
-                        # Get text content
                         if message.text and hasattr(message.text, 'content'):
                             content = message.text.content.strip()
                         elif isinstance(message.text, str):
                             content = message.text.strip()
                         else:
-                            # Try get_text_list
                             text_list = message.get_text_list()
                             if text_list:
                                 content = " ".join(text_list).strip()
@@ -646,12 +671,23 @@ def dingtalk_stream_loop():
 
             client.register_callback_handler(dingtalk_stream.ChatbotMessage.TOPIC, BotHandler())
             log("[dingtalk] Stream 连接中...")
-            client.start_forever()
+
+            stream_thread = threading.Thread(target=client.start_forever, daemon=True)
+            stream_thread.start()
+
+            while stream_thread.is_alive():
+                time.sleep(10)
+                elapsed = time.time() - last_message_time
+                if elapsed > WATCHDOG_TIMEOUT:
+                    log(f"[dingtalk] Stream 超过 {WATCHDOG_TIMEOUT}s 无消息，强制重连")
+                    break
+            else:
+                log("[dingtalk] Stream 线程已退出，重连中...")
 
         except Exception as e:
             log(f"[dingtalk] Stream 异常: {e}")
-            time.sleep(10)
-            continue
+
+        time.sleep(5)
 
 
 def dingtalk_thread_entry():

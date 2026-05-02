@@ -522,12 +522,12 @@ def main():
 
             # 向回复渠道发送确认反馈
             resp_channel = response.get("channel", "")
-            if resp_channel in ("weixin", "qq"):
-                feedback_msg = f"已收到回复: {response['reply']}（{hook_output}）"
+            if resp_channel:
+                feedback_msg = f"已收到回复: {response['reply']}"
                 for ch in channels:
                     if ch.is_enabled() and ch.name == resp_channel:
-                        ch.send("Claude Code - 回复确认", feedback_msg)
-                        log(f"[{ch.name}] 发送反馈: {feedback_msg}")
+                        ok = ch.send("Claude Code - 回复确认", feedback_msg)
+                        log(f"[{ch.name}] 发送反馈: {feedback_msg} ({'成功' if ok else '失败'})")
                         break
         else:
             log("等待用户响应超时")
