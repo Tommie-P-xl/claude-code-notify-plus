@@ -905,28 +905,30 @@ function app() {
 
     async refreshAll() {
       try {
+        // 并行加载，单个失败不影响其他
+        const safe = async (fn) => { try { return await fn(); } catch (e) { return {}; } };
         const [cfg, st, wx, qq, tg, fs, dt, hk, lg, pm] = await Promise.all([
-          this.api('GET', '/api/config'),
-          this.api('GET', '/api/status'),
-          this.api('GET', '/api/weixin/status'),
-          this.api('GET', '/api/qq/status'),
-          this.api('GET', '/api/telegram/status'),
-          this.api('GET', '/api/feishu/status'),
-          this.api('GET', '/api/dingtalk/status'),
-          this.api('GET', '/api/hooks'),
-          this.api('GET', '/api/logs?lines=50'),
-          this.api('GET', '/api/permission-mode'),
+          safe(() => this.api('GET', '/api/config')),
+          safe(() => this.api('GET', '/api/status')),
+          safe(() => this.api('GET', '/api/weixin/status')),
+          safe(() => this.api('GET', '/api/qq/status')),
+          safe(() => this.api('GET', '/api/telegram/status')),
+          safe(() => this.api('GET', '/api/feishu/status')),
+          safe(() => this.api('GET', '/api/dingtalk/status')),
+          safe(() => this.api('GET', '/api/hooks')),
+          safe(() => this.api('GET', '/api/logs?lines=50')),
+          safe(() => this.api('GET', '/api/permission-mode')),
         ]);
-        this.config = cfg;
-        this.status = st;
-        this.weixinStatus = wx;
-        this.qqStatus = qq;
-        this.tgStatus = tg;
-        this.fsStatus = fs;
-        this.dtStatus = dt;
-        this.hooksInfo = hk;
-        this.logLines = lg.lines || [];
-        this.permMode = pm.mode || 'default';
+        this.config = cfg || {};
+        this.status = st || {};
+        this.weixinStatus = wx || {};
+        this.qqStatus = qq || {};
+        this.tgStatus = tg || {};
+        this.fsStatus = fs || {};
+        this.dtStatus = dt || {};
+        this.hooksInfo = hk || { installed: false, events: {}, tool_matchers: [] };
+        this.logLines = (lg && lg.lines) || [];
+        this.permMode = (pm && pm.mode) || 'default';
         // 读取提示音配置
         const wtSound = cfg.windows_toast?.sound || 'reminder';
         this.soundEnabled = wtSound !== 'silent';
@@ -1354,6 +1356,14 @@ function app() {
     },
   };
 }
+</script>
+<script>
+// 安全回退：如果 Alpine.js 加载失败，移除 x-cloak 使内容可见
+setTimeout(() => {
+  if (!window.Alpine) {
+    document.querySelectorAll('[x-cloak]').forEach(el => el.removeAttribute('x-cloak'));
+  }
+}, 3000);
 </script>
 </body>
 </html>
