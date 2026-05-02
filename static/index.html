@@ -539,12 +539,12 @@
       </h3>
 
       <div class="mb-6 p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
-        <p class="text-xs text-gray-400">
-          在 <a href="https://t.me/BotFather" target="_blank" class="text-indigo-400 hover:underline">@BotFather</a> 中创建 Bot 获取 Token。
-        </p>
-        <p class="text-xs text-gray-500 mt-2">
-          验证 Token 后，给 Bot 发送一条消息，系统将自动获取 Chat ID。
-        </p>
+        <p class="text-xs text-gray-400 font-medium mb-2">配置步骤：</p>
+        <ol class="text-xs text-gray-400 space-y-1 list-decimal list-inside">
+          <li>在 Telegram 中找 <a href="https://t.me/BotFather" target="_blank" class="text-indigo-400 hover:underline">@BotFather</a>，发送 <code class="bg-gray-700/50 px-1 rounded">/newbot</code> 创建 Bot</li>
+          <li>获取 Bot Token，填入下方验证</li>
+          <li>验证成功后，给 Bot 发送一条消息，系统自动获取 Chat ID</li>
+        </ol>
       </div>
 
       <div class="mb-6 p-4 rounded-lg" :class="tgStatus.logged_in ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-gray-700/30 border border-gray-600/30'">
@@ -599,12 +599,15 @@
       </h3>
 
       <div class="mb-6 p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
-        <p class="text-xs text-gray-400">
-          在 <a href="https://open.feishu.cn/" target="_blank" class="text-indigo-400 hover:underline">飞书开放平台</a> 创建企业自建应用，开启机器人能力。
-        </p>
-        <p class="text-xs text-gray-500 mt-2">
-          验证凭据后，给 Bot 发送一条消息，系统将自动获取 Open ID。
-        </p>
+        <p class="text-xs text-gray-400 font-medium mb-2">配置步骤：</p>
+        <ol class="text-xs text-gray-400 space-y-1 list-decimal list-inside">
+          <li>在 <a href="https://open.feishu.cn/" target="_blank" class="text-indigo-400 hover:underline">飞书开放平台</a> 创建企业自建应用</li>
+          <li>开启<b>机器人</b>能力</li>
+          <li>添加权限：<code class="bg-gray-700/50 px-1 rounded">im:message</code>、<code class="bg-gray-700/50 px-1 rounded">im:message.receive_v1</code>、<code class="bg-gray-700/50 px-1 rounded">auth:user_access_token:read</code></li>
+          <li>事件订阅 → 添加 <code class="bg-gray-700/50 px-1 rounded">im.message.receive_v1</code></li>
+          <li>发布应用（至少发布到企业内部）</li>
+          <li>验证凭据后，在飞书中找到 Bot 发送一条消息，系统自动获取 Open ID</li>
+        </ol>
       </div>
 
       <div class="mb-6 p-4 rounded-lg" :class="fsStatus.logged_in ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-gray-700/30 border border-gray-600/30'">
@@ -667,12 +670,14 @@
       </h3>
 
       <div class="mb-6 p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
-        <p class="text-xs text-gray-400">
-          在 <a href="https://open.dingtalk.com/" target="_blank" class="text-indigo-400 hover:underline">钉钉开放平台</a> 创建应用并添加机器人能力。
-        </p>
-        <p class="text-xs text-gray-500 mt-2">
-          验证凭据后，给 Bot 发送一条消息，系统将自动获取 User ID。
-        </p>
+        <p class="text-xs text-gray-400 font-medium mb-2">配置步骤：</p>
+        <ol class="text-xs text-gray-400 space-y-1 list-decimal list-inside">
+          <li>在 <a href="https://open.dingtalk.com/" target="_blank" class="text-indigo-400 hover:underline">钉钉开放平台</a> 创建应用</li>
+          <li>添加<b>机器人</b>能力</li>
+          <li>配置消息接收（Stream 模式）</li>
+          <li>发布应用</li>
+          <li>验证凭据后，在钉钉中找到 Bot 发送一条消息，系统自动获取 User ID</li>
+        </ol>
       </div>
 
       <div class="mb-6 p-4 rounded-lg" :class="dtStatus.logged_in ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-gray-700/30 border border-gray-600/30'">

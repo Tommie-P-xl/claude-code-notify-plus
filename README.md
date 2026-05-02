@@ -135,6 +135,29 @@ hook 触发 → 解析上下文 → 提取选项 → 创建 pending 文件
 
 > **推荐 QQ 或 Telegram 作为主要远程通知渠道。** 微信的 `context_token` 会随时间过期（通常数小时到一天），过期后需在微信中给 bot 发消息恢复。QQ 和 Telegram 没有此问题。飞书和钉钉均使用出站长连接，无需公网 IP。
 
+### 渠道配置说明
+
+**Telegram：**
+1. 在 Telegram 中找 [@BotFather](https://t.me/BotFather)，发送 `/newbot` 创建 Bot
+2. 获取 Bot Token，在 Web UI 验证并保存
+3. 给 Bot 发送一条消息，系统自动获取 Chat ID
+
+**飞书：**
+1. 在 [飞书开放平台](https://open.feishu.cn/) 创建企业自建应用
+2. 开启**机器人**能力
+3. 添加权限：`im:message`、`im:message.receive_v1`、`auth:user_access_token:read`
+4. 事件订阅 → 添加 `im.message.receive_v1`
+5. 发布应用（至少发布到企业内部）
+6. 在 Web UI 填入 App ID / App Secret，验证并保存
+7. 在飞书中找到 Bot 发送一条消息，系统自动获取 Open ID
+
+**钉钉：**
+1. 在 [钉钉开放平台](https://open.dingtalk.com/) 创建应用
+2. 添加**机器人**能力，配置消息接收（Stream 模式）
+3. 发布应用
+4. 在 Web UI 填入 App Key / App Secret，验证并保存
+5. 在钉钉中找到 Bot 发送一条消息，系统自动获取 User ID
+
 ---
 
 ## 交互模式
