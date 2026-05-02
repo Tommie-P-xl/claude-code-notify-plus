@@ -178,6 +178,78 @@
           <span x-text="qqStatus.message || '检查中...'" class="text-gray-400"></span>
         </div>
       </div>
+
+      <!-- Telegram Card -->
+      <div class="card rounded-xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-cyan-500/15 flex items-center justify-center text-cyan-400 text-xl">T</div>
+            <div>
+              <div class="font-semibold text-white">Telegram</div>
+              <div class="text-xs text-gray-400">Bot API</div>
+            </div>
+          </div>
+          <button @click="toggleChannel('telegram', !config.telegram?.enabled)"
+                  class="relative w-11 h-6 rounded-full toggle-track"
+                  :class="config.telegram?.enabled ? 'bg-indigo-500' : 'bg-gray-600'">
+            <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow toggle-thumb"
+                  :class="config.telegram?.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
+          </button>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="w-2 h-2 rounded-full pulse-dot relative"
+                :class="tgStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+          <span x-text="tgStatus.message || '检查中...'" class="text-gray-400"></span>
+        </div>
+      </div>
+
+      <!-- 飞书 Card -->
+      <div class="card rounded-xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-blue-500/15 flex items-center justify-center text-blue-400 text-xl">F</div>
+            <div>
+              <div class="font-semibold text-white">飞书</div>
+              <div class="text-xs text-gray-400">Open API</div>
+            </div>
+          </div>
+          <button @click="toggleChannel('feishu', !config.feishu?.enabled)"
+                  class="relative w-11 h-6 rounded-full toggle-track"
+                  :class="config.feishu?.enabled ? 'bg-indigo-500' : 'bg-gray-600'">
+            <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow toggle-thumb"
+                  :class="config.feishu?.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
+          </button>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="w-2 h-2 rounded-full pulse-dot relative"
+                :class="fsStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+          <span x-text="fsStatus.message || '检查中...'" class="text-gray-400"></span>
+        </div>
+      </div>
+
+      <!-- 钉钉 Card -->
+      <div class="card rounded-xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-orange-500/15 flex items-center justify-center text-orange-400 text-xl">D</div>
+            <div>
+              <div class="font-semibold text-white">钉钉</div>
+              <div class="text-xs text-gray-400">Stream API</div>
+            </div>
+          </div>
+          <button @click="toggleChannel('dingtalk', !config.dingtalk?.enabled)"
+                  class="relative w-11 h-6 rounded-full toggle-track"
+                  :class="config.dingtalk?.enabled ? 'bg-indigo-500' : 'bg-gray-600'">
+            <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow toggle-thumb"
+                  :class="config.dingtalk?.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
+          </button>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="w-2 h-2 rounded-full pulse-dot relative"
+                :class="dtStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+          <span x-text="dtStatus.message || '检查中...'" class="text-gray-400"></span>
+        </div>
+      </div>
     </div>
 
     <!-- Permission Mode -->
@@ -458,6 +530,157 @@
     </div>
   </div>
 
+  <!-- ==================== Telegram Tab ==================== -->
+  <div x-show="currentTab === 'telegram'" x-cloak>
+    <div class="card rounded-xl p-6 mb-6">
+      <h3 class="font-semibold text-white mb-4 flex items-center gap-2">
+        <span class="w-8 h-8 rounded-lg bg-cyan-500/15 flex items-center justify-center text-cyan-400 text-sm">T</span>
+        Telegram Bot 配置
+      </h3>
+
+      <div class="mb-6 p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
+        <p class="text-xs text-gray-400">
+          在 <a href="https://t.me/BotFather" target="_blank" class="text-indigo-400 hover:underline">@BotFather</a> 中创建 Bot 获取 Token。
+        </p>
+        <p class="text-xs text-gray-500 mt-2">
+          验证 Token 后，给 Bot 发送一条消息，系统将自动获取 Chat ID。
+        </p>
+      </div>
+
+      <div class="mb-6 p-4 rounded-lg" :class="tgStatus.logged_in ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-gray-700/30 border border-gray-600/30'">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="w-3 h-3 rounded-full" :class="tgStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+            <div>
+              <div class="text-sm font-medium text-white" x-text="tgStatus.logged_in ? '已配置' : '未配置'"></div>
+              <div class="text-xs text-gray-400 mt-0.5" x-text="tgStatus.message || ''"></div>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button @click="refreshTgStatus()" class="px-3 py-1.5 text-xs rounded-lg bg-gray-700/50 hover:bg-gray-700 text-gray-300 transition">刷新</button>
+            <button x-show="tgStatus.logged_in" @click="tgLogout()"
+                    class="px-3 py-1.5 text-xs rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-400 transition">清除</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h4 class="text-sm font-medium text-gray-300 mb-3">Bot Token</h4>
+        <div class="mb-4">
+          <input type="password" x-model="tgForm.bot_token" placeholder="从 @BotFather 获取"
+                 class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+        </div>
+        <button @click="validateTg()" class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium">验证并保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 飞书 Tab ==================== -->
+  <div x-show="currentTab === 'feishu'" x-cloak>
+    <div class="card rounded-xl p-6 mb-6">
+      <h3 class="font-semibold text-white mb-4 flex items-center gap-2">
+        <span class="w-8 h-8 rounded-lg bg-blue-500/15 flex items-center justify-center text-blue-400 text-sm">F</span>
+        飞书 Bot 配置
+      </h3>
+
+      <div class="mb-6 p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
+        <p class="text-xs text-gray-400">
+          在 <a href="https://open.feishu.cn/" target="_blank" class="text-indigo-400 hover:underline">飞书开放平台</a> 创建企业自建应用，开启机器人能力。
+        </p>
+        <p class="text-xs text-gray-500 mt-2">
+          验证凭据后，给 Bot 发送一条消息，系统将自动获取 Open ID。
+        </p>
+      </div>
+
+      <div class="mb-6 p-4 rounded-lg" :class="fsStatus.logged_in ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-gray-700/30 border border-gray-600/30'">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="w-3 h-3 rounded-full" :class="fsStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+            <div>
+              <div class="text-sm font-medium text-white" x-text="fsStatus.logged_in ? '已配置' : '未配置'"></div>
+              <div class="text-xs text-gray-400 mt-0.5" x-text="fsStatus.message || ''"></div>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button @click="refreshFsStatus()" class="px-3 py-1.5 text-xs rounded-lg bg-gray-700/50 hover:bg-gray-700 text-gray-300 transition">刷新</button>
+            <button x-show="fsStatus.logged_in" @click="fsLogout()"
+                    class="px-3 py-1.5 text-xs rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-400 transition">清除</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h4 class="text-sm font-medium text-gray-300 mb-3">应用凭据</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">App ID</label>
+            <input type="text" x-model="fsForm.app_id" placeholder="飞书 App ID"
+                   class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">App Secret</label>
+            <input type="password" x-model="fsForm.app_secret" placeholder="飞书 App Secret"
+                   class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+          </div>
+        </div>
+        <button @click="validateFs()" class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium">验证并保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 钉钉 Tab ==================== -->
+  <div x-show="currentTab === 'dingtalk'" x-cloak>
+    <div class="card rounded-xl p-6 mb-6">
+      <h3 class="font-semibold text-white mb-4 flex items-center gap-2">
+        <span class="w-8 h-8 rounded-lg bg-orange-500/15 flex items-center justify-center text-orange-400 text-sm">D</span>
+        钉钉 Bot 配置
+      </h3>
+
+      <div class="mb-6 p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
+        <p class="text-xs text-gray-400">
+          在 <a href="https://open.dingtalk.com/" target="_blank" class="text-indigo-400 hover:underline">钉钉开放平台</a> 创建应用并添加机器人能力。
+        </p>
+        <p class="text-xs text-gray-500 mt-2">
+          验证凭据后，给 Bot 发送一条消息，系统将自动获取 User ID。
+        </p>
+      </div>
+
+      <div class="mb-6 p-4 rounded-lg" :class="dtStatus.logged_in ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-gray-700/30 border border-gray-600/30'">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="w-3 h-3 rounded-full" :class="dtStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+            <div>
+              <div class="text-sm font-medium text-white" x-text="dtStatus.logged_in ? '已配置' : '未配置'"></div>
+              <div class="text-xs text-gray-400 mt-0.5" x-text="dtStatus.message || ''"></div>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button @click="refreshDtStatus()" class="px-3 py-1.5 text-xs rounded-lg bg-gray-700/50 hover:bg-gray-700 text-gray-300 transition">刷新</button>
+            <button x-show="dtStatus.logged_in" @click="dtLogout()"
+                    class="px-3 py-1.5 text-xs rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-400 transition">清除</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h4 class="text-sm font-medium text-gray-300 mb-3">应用凭据</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">App Key</label>
+            <input type="text" x-model="dtForm.app_key" placeholder="钉钉 App Key"
+                   class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">App Secret</label>
+            <input type="password" x-model="dtForm.app_secret" placeholder="钉钉 App Secret"
+                   class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+          </div>
+        </div>
+        <button @click="validateDt()" class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium">验证并保存</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ==================== Hooks Tab ==================== -->
   <div x-show="currentTab === 'hooks'" x-cloak>
     <div class="card rounded-xl p-6 mb-6">
@@ -544,6 +767,9 @@ function app() {
       { id: 'dashboard', label: '仪表盘' },
       { id: 'weixin', label: '微信' },
       { id: 'qq', label: 'QQ Bot' },
+      { id: 'telegram', label: 'Telegram' },
+      { id: 'feishu', label: '飞书' },
+      { id: 'dingtalk', label: '钉钉' },
       { id: 'hooks', label: 'Hooks' },
       { id: 'logs', label: '日志' },
     ],
@@ -565,6 +791,12 @@ function app() {
     qrLogin: { in_progress: false, qr_url: null, status: 'idle', error: null },
     wxForm: { bot_token: '', baseurl: 'https://ilinkai.weixin.qq.com', to_user_id: '' },
     qqForm: { app_id: '', app_secret: '', target_id: '' },
+    tgForm: { bot_token: '' },
+    tgStatus: {},
+    fsForm: { app_id: '', app_secret: '' },
+    fsStatus: {},
+    dtForm: { app_key: '', app_secret: '' },
+    dtStatus: {},
     qqValidating: false,
     qqWaitingOpenId: false,
     permMode: 'default',
@@ -602,7 +834,10 @@ function app() {
       if (c.windows_toast?.enabled) n++;
       if (c.weixin?.enabled) n++;
       if (c.qq?.enabled) n++;
-      return n + '/3';
+      if (c.telegram?.enabled) n++;
+      if (c.feishu?.enabled) n++;
+      if (c.dingtalk?.enabled) n++;
+      return n + '/6';
     },
 
     toast(type, title, message = '') {
@@ -623,11 +858,14 @@ function app() {
 
     async refreshAll() {
       try {
-        const [cfg, st, wx, qq, hk, lg, pm] = await Promise.all([
+        const [cfg, st, wx, qq, tg, fs, dt, hk, lg, pm] = await Promise.all([
           this.api('GET', '/api/config'),
           this.api('GET', '/api/status'),
           this.api('GET', '/api/weixin/status'),
           this.api('GET', '/api/qq/status'),
+          this.api('GET', '/api/telegram/status'),
+          this.api('GET', '/api/feishu/status'),
+          this.api('GET', '/api/dingtalk/status'),
           this.api('GET', '/api/hooks'),
           this.api('GET', '/api/logs?lines=50'),
           this.api('GET', '/api/permission-mode'),
@@ -636,6 +874,9 @@ function app() {
         this.status = st;
         this.weixinStatus = wx;
         this.qqStatus = qq;
+        this.tgStatus = tg;
+        this.fsStatus = fs;
+        this.dtStatus = dt;
         this.hooksInfo = hk;
         this.logLines = lg.lines || [];
         this.permMode = pm.mode || 'default';
@@ -874,6 +1115,80 @@ function app() {
         await this.api('POST', '/api/qq/logout');
         this.toast('success', 'QQ Bot 登录已清除');
         await this.refreshAll();
+      } catch (e) { this.toast('error', '清除失败', e.message); }
+    },
+
+    // Telegram
+    async validateTg() {
+      try {
+        const r = await this.api('POST', '/api/telegram/validate', { bot_token: this.tgForm.bot_token });
+        if (r.ok) {
+          this.tgForm.bot_token = '';
+          this.tgStatus = { logged_in: true, message: r.message };
+          this.toast('success', 'Telegram 验证成功', r.message);
+        } else {
+          this.toast('error', '验证失败', r.error);
+        }
+      } catch (e) { this.toast('error', '验证失败', e.message); }
+    },
+    async refreshTgStatus() {
+      try { this.tgStatus = await this.api('GET', '/api/telegram/status'); } catch (e) {}
+    },
+    async tgLogout() {
+      try {
+        await this.api('POST', '/api/telegram/logout');
+        this.tgStatus = {};
+        this.toast('success', 'Telegram 已清除');
+      } catch (e) { this.toast('error', '清除失败', e.message); }
+    },
+
+    // 飞书
+    async validateFs() {
+      try {
+        const r = await this.api('POST', '/api/feishu/validate', { app_id: this.fsForm.app_id, app_secret: this.fsForm.app_secret });
+        if (r.ok) {
+          this.fsForm.app_id = '';
+          this.fsForm.app_secret = '';
+          this.fsStatus = { logged_in: true, message: r.message };
+          this.toast('success', '飞书验证成功', r.message);
+        } else {
+          this.toast('error', '验证失败', r.error);
+        }
+      } catch (e) { this.toast('error', '验证失败', e.message); }
+    },
+    async refreshFsStatus() {
+      try { this.fsStatus = await this.api('GET', '/api/feishu/status'); } catch (e) {}
+    },
+    async fsLogout() {
+      try {
+        await this.api('POST', '/api/feishu/logout');
+        this.fsStatus = {};
+        this.toast('success', '飞书已清除');
+      } catch (e) { this.toast('error', '清除失败', e.message); }
+    },
+
+    // 钉钉
+    async validateDt() {
+      try {
+        const r = await this.api('POST', '/api/dingtalk/validate', { app_key: this.dtForm.app_key, app_secret: this.dtForm.app_secret });
+        if (r.ok) {
+          this.dtForm.app_key = '';
+          this.dtForm.app_secret = '';
+          this.dtStatus = { logged_in: true, message: r.message };
+          this.toast('success', '钉钉验证成功', r.message);
+        } else {
+          this.toast('error', '验证失败', r.error);
+        }
+      } catch (e) { this.toast('error', '验证失败', e.message); }
+    },
+    async refreshDtStatus() {
+      try { this.dtStatus = await this.api('GET', '/api/dingtalk/status'); } catch (e) {}
+    },
+    async dtLogout() {
+      try {
+        await this.api('POST', '/api/dingtalk/logout');
+        this.dtStatus = {};
+        this.toast('success', '钉钉已清除');
       } catch (e) { this.toast('error', '清除失败', e.message); }
     },
 
