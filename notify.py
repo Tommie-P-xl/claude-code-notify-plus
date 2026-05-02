@@ -25,6 +25,9 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from channels.windows_toast import WindowsToastChannel
 from channels.weixin import WeixinChannel
 from channels.qq import QQBotChannel
+from channels.telegram import TelegramChannel
+from channels.feishu import FeishuChannel
+from channels.dingtalk import DingTalkChannel
 
 CONFIG_FILE = SCRIPT_DIR / "config.json"
 
@@ -47,6 +50,23 @@ DEFAULT_CONFIG = {
         "app_id": "",
         "app_secret": "",
         "target_id": "",
+    },
+    "telegram": {
+        "enabled": False,
+        "bot_token": "",
+        "chat_id": "",
+    },
+    "feishu": {
+        "enabled": False,
+        "app_id": "",
+        "app_secret": "",
+        "receive_id": "",
+    },
+    "dingtalk": {
+        "enabled": False,
+        "app_key": "",
+        "app_secret": "",
+        "user_id": "",
     },
 }
 
@@ -147,6 +167,9 @@ def collect_channels(config: dict):
         WindowsToastChannel(config),
         WeixinChannel(config),
         QQBotChannel(config),
+        TelegramChannel(config),
+        FeishuChannel(config),
+        DingTalkChannel(config),
     ]
 
 
@@ -390,7 +413,10 @@ def main():
     # 微信或 QQ 已启用时，确保 keepalive 守护进程在运行
     wx_enabled = config.get("weixin", {}).get("enabled") and config.get("weixin", {}).get("bot_token")
     qq_enabled = config.get("qq", {}).get("enabled") and config.get("qq", {}).get("app_id")
-    if wx_enabled or qq_enabled:
+    tg_enabled = config.get("telegram", {}).get("enabled") and config.get("telegram", {}).get("bot_token")
+    fs_enabled = config.get("feishu", {}).get("enabled") and config.get("feishu", {}).get("app_id")
+    dt_enabled = config.get("dingtalk", {}).get("enabled") and config.get("dingtalk", {}).get("app_key")
+    if wx_enabled or qq_enabled or tg_enabled or fs_enabled or dt_enabled:
         try:
             from channels.weixin import start_keepalive
             start_keepalive()
