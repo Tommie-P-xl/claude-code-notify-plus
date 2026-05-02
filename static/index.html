@@ -636,7 +636,7 @@
                    class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
           </div>
           <div>
-            <label class="block text-xs text-gray-400 mb-1">App Secret</label>
+            <label class="block text-xs text-gray-400 mb-1">Client Secret</label>
             <input type="password" x-model="fsForm.app_secret" placeholder="飞书 App Secret"
                    class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
           </div>
@@ -674,7 +674,8 @@
         <ol class="text-xs text-gray-400 space-y-1 list-decimal list-inside">
           <li>在 <a href="https://open.dingtalk.com/" target="_blank" class="text-indigo-400 hover:underline">钉钉开放平台</a> 创建应用</li>
           <li>添加<b>机器人</b>能力</li>
-          <li>配置消息接收（Stream 模式）</li>
+          <li>在「消息接收模式」中选择 <b>Stream 模式</b></li>
+          <li>获取 Client ID 和 Client Secret（在应用凭证页面）</li>
           <li>发布应用</li>
           <li>验证凭据后，在钉钉中找到 Bot 发送一条消息，系统自动获取 User ID</li>
         </ol>
@@ -701,13 +702,13 @@
         <h4 class="text-sm font-medium text-gray-300 mb-3">应用凭据</h4>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>
-            <label class="block text-xs text-gray-400 mb-1">App Key</label>
-            <input type="text" x-model="dtForm.app_key" placeholder="钉钉 App Key"
+            <label class="block text-xs text-gray-400 mb-1">Client ID</label>
+            <input type="text" x-model="dtForm.client_id" placeholder="钉钉 Client ID"
                    class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
           </div>
           <div>
-            <label class="block text-xs text-gray-400 mb-1">App Secret</label>
-            <input type="password" x-model="dtForm.app_secret" placeholder="钉钉 App Secret"
+            <label class="block text-xs text-gray-400 mb-1">Client Secret</label>
+            <input type="password" x-model="dtForm.client_secret" placeholder="钉钉 Client Secret"
                    class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
           </div>
         </div>
@@ -849,7 +850,7 @@ function app() {
     fsStatus: {},
     fsWaitingOpenId: false,
     _fsPollTimer: null,
-    dtForm: { app_key: '', app_secret: '' },
+    dtForm: { client_id: '', client_secret: '' },
     dtStatus: {},
     dtWaitingUserId: false,
     _dtPollTimer: null,
@@ -1276,10 +1277,10 @@ function app() {
     // 钉钉
     async validateDt() {
       try {
-        const r = await this.api('POST', '/api/dingtalk/validate', { app_key: this.dtForm.app_key, app_secret: this.dtForm.app_secret });
+        const r = await this.api('POST', '/api/dingtalk/validate', { client_id: this.dtForm.client_id, client_secret: this.dtForm.client_secret });
         if (r.ok) {
-          this.dtForm.app_key = '';
-          this.dtForm.app_secret = '';
+          this.dtForm.client_id = '';
+          this.dtForm.client_secret = '';
           this.toast('success', '钉钉验证成功', r.message);
           await this.refreshDtStatus();
           if (!this.dtStatus.user_id) {

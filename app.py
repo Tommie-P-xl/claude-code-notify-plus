@@ -154,8 +154,8 @@ def create_app() -> Flask:
                 if not cfg["feishu"].get("app_id") or not cfg["feishu"].get("app_secret"):
                     return jsonify({"ok": False, "error": "请先配置飞书 App ID / App Secret"}), 400
             elif name == "dingtalk":
-                if not cfg["dingtalk"].get("app_key") or not cfg["dingtalk"].get("app_secret"):
-                    return jsonify({"ok": False, "error": "请先配置钉钉 App Key / App Secret"}), 400
+                if not cfg["dingtalk"].get("client_id") or not cfg["dingtalk"].get("client_secret"):
+                    return jsonify({"ok": False, "error": "请先配置钉钉 Client ID / Client Secret"}), 400
 
         cfg[name]["enabled"] = enabled
         save_config(cfg)
@@ -359,16 +359,16 @@ def create_app() -> Flask:
         from channels.dingtalk import DingTalkChannel
         from notify import load_config, save_config
         data = request.get_json(force=True)
-        app_key = data.get("app_key", "").strip()
-        app_secret = data.get("app_secret", "").strip()
-        if not app_key or not app_secret:
-            return jsonify({"ok": False, "error": "App Key 和 App Secret 不能为空"}), 400
+        client_id = data.get("client_id", "").strip()
+        client_secret = data.get("client_secret", "").strip()
+        if not client_id or not client_secret:
+            return jsonify({"ok": False, "error": "Client ID 和 Client Secret 不能为空"}), 400
 
-        result = DingTalkChannel.validate_credentials(app_key, app_secret)
+        result = DingTalkChannel.validate_credentials(client_id, client_secret)
         if result.get("ok"):
             cfg = load_config()
-            cfg["dingtalk"]["app_key"] = app_key
-            cfg["dingtalk"]["app_secret"] = app_secret
+            cfg["dingtalk"]["client_id"] = client_id
+            cfg["dingtalk"]["client_secret"] = client_secret
             save_config(cfg)
             _restart_keepalive()
         return jsonify(result)
@@ -384,8 +384,8 @@ def create_app() -> Flask:
     def dingtalk_logout():
         from notify import load_config, save_config
         cfg = load_config()
-        cfg["dingtalk"]["app_key"] = ""
-        cfg["dingtalk"]["app_secret"] = ""
+        cfg["dingtalk"]["client_id"] = ""
+        cfg["dingtalk"]["client_secret"] = ""
         cfg["dingtalk"]["user_id"] = ""
         cfg["dingtalk"]["enabled"] = False
         save_config(cfg)

@@ -45,15 +45,15 @@ class DingTalkChannel(NotificationChannel):
         if self._access_token and now < self._token_expires_at:
             return self._access_token
 
-        app_key = self._dt_config.get("app_key", "")
-        app_secret = self._dt_config.get("app_secret", "")
-        if not app_key or not app_secret:
-            _log("[dingtalk] app_key 或 app_secret 为空")
+        client_id = self._dt_config.get("client_id", "")
+        client_secret = self._dt_config.get("client_secret", "")
+        if not client_id or not client_secret:
+            _log("[dingtalk] client_id 或 client_secret 为空")
             return None
 
         body = json.dumps({
-            "appKey": app_key,
-            "appSecret": app_secret,
+            "appKey": client_id,
+            "appSecret": client_secret,
         }).encode("utf-8")
 
         headers = {"Content-Type": "application/json"}
@@ -76,15 +76,15 @@ class DingTalkChannel(NotificationChannel):
         if not token:
             return False
 
-        robot_code = self._dt_config.get("app_key", "")
+        client_id = self._dt_config.get("client_id", "")
         user_id = self._dt_config.get("user_id", "")
-        if not robot_code or not user_id:
-            _log("[dingtalk] app_key 或 user_id 为空")
+        if not client_id or not user_id:
+            _log("[dingtalk] client_id 或 user_id 为空")
             return False
 
         full_text = f"【{title}】\n{message}"
         body = json.dumps({
-            "robotCode": robot_code,
+            "robotCode": client_id,
             "userIds": [user_id],
             "msgKey": "sampleText",
             "msgParam": json.dumps({"content": full_text}),
@@ -110,11 +110,11 @@ class DingTalkChannel(NotificationChannel):
             return False
 
     @staticmethod
-    def validate_credentials(app_key: str, app_secret: str) -> Dict[str, Any]:
+    def validate_credentials(client_id: str, client_secret: str) -> Dict[str, Any]:
         """验证钉钉凭据是否有效"""
         body = json.dumps({
-            "appKey": app_key,
-            "appSecret": app_secret,
+            "appKey": client_id,
+            "appSecret": client_secret,
         }).encode("utf-8")
 
         headers = {"Content-Type": "application/json"}
@@ -134,12 +134,12 @@ class DingTalkChannel(NotificationChannel):
     @staticmethod
     def get_login_status(config: Dict[str, Any]) -> Dict[str, Any]:
         dt_config = config.get("dingtalk", {})
-        app_key = dt_config.get("app_key", "")
-        app_secret = dt_config.get("app_secret", "")
+        client_id = dt_config.get("client_id", "")
+        client_secret = dt_config.get("client_secret", "")
         user_id = dt_config.get("user_id", "")
 
-        if not app_key or not app_secret:
-            return {"logged_in": False, "message": "未配置 App Key / App Secret"}
+        if not client_id or not client_secret:
+            return {"logged_in": False, "message": "未配置 Client ID / Client Secret"}
 
         return {
             "logged_in": True,

@@ -64,8 +64,8 @@ DEFAULT_CONFIG = {
     },
     "dingtalk": {
         "enabled": False,
-        "app_key": "",
-        "app_secret": "",
+        "client_id": "",
+        "client_secret": "",
         "user_id": "",
     },
 }
@@ -415,7 +415,7 @@ def main():
     qq_enabled = config.get("qq", {}).get("app_id")  # QQ: 有凭据就启动
     tg_enabled = config.get("telegram", {}).get("bot_token")  # Telegram: 有 token 就启动
     fs_enabled = config.get("feishu", {}).get("app_id") and config.get("feishu", {}).get("app_secret")  # 飞书: 有凭据就启动
-    dt_enabled = config.get("dingtalk", {}).get("app_key") and config.get("dingtalk", {}).get("app_secret")  # 钉钉: 有凭据就启动
+    dt_enabled = config.get("dingtalk", {}).get("client_id") and config.get("dingtalk", {}).get("client_secret")  # 钉钉: 有凭据就启动
     if wx_enabled or qq_enabled or tg_enabled or fs_enabled or dt_enabled:
         try:
             from channels.weixin import start_keepalive

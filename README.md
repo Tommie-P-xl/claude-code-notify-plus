@@ -153,10 +153,12 @@ hook 触发 → 解析上下文 → 提取选项 → 创建 pending 文件
 
 **钉钉：**
 1. 在 [钉钉开放平台](https://open.dingtalk.com/) 创建应用
-2. 添加**机器人**能力，配置消息接收（Stream 模式）
-3. 发布应用
-4. 在 Web UI 填入 App Key / App Secret，验证并保存
-5. 在钉钉中找到 Bot 发送一条消息，系统自动获取 User ID
+2. 添加**机器人**能力
+3. 在「消息接收模式」中选择 **Stream 模式**
+4. 获取 Client ID 和 Client Secret（在应用凭证页面）
+5. 发布应用
+6. 在 Web UI 填入 Client ID / Client Secret，验证并保存
+7. 在钉钉中找到 Bot 发送一条消息，系统自动获取 User ID
 
 ---
 

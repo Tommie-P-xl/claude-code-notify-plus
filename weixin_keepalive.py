@@ -592,7 +592,7 @@ def dingtalk_stream_loop():
     """钉钉 Stream 长连接监听，自动获取 user_id"""
     try:
         import dingtalk_stream
-        from dingtalk_stream import DingTalkStreamClient
+        from dingtalk_stream import DingTalkStreamClient, ChatbotHandler, Credential
     except ImportError:
         log("[dingtalk] dingtalk-stream 未安装，跳过钉钉监听")
         return
@@ -600,40 +600,42 @@ def dingtalk_stream_loop():
     while True:
         cfg = load_config()
         dt = cfg.get("dingtalk", {})
-        app_key = dt.get("app_key", "")
-        app_secret = dt.get("app_secret", "")
+        client_id = dt.get("client_id", "")
+        client_secret = dt.get("client_secret", "")
 
-        if not app_key or not app_secret:
+        if not client_id or not client_secret:
             log("[dingtalk] 钉钉配置不完整，监听退出")
             break
 
         try:
-            client = DingTalkStreamClient(app_key, app_secret)
+            credential = Credential(client_id, client_secret)
+            client = DingTalkStreamClient(credential)
 
-            @client.register_callback_handler
-            def on_message(data):
-                try:
-                    content = ""
-                    sender_id = ""
-                    if isinstance(data, dict):
-                        content = data.get("text", {}).get("content", "").strip()
-                        sender_id = data.get("senderStaffId", "") or data.get("senderId", "")
-                    else:
-                        content = getattr(data, "text", {}).get("content", "").strip() if hasattr(data, "text") else ""
-                        sender_id = getattr(data, "sender_staff_id", "") or getattr(data, "sender_id", "")
+            class BotHandler(ChatbotHandler):
+                def process(self, message: dingtalk_stream.ChatbotMessage):
+                    try:
+                        content = ""
+                        if message.text and message.text.content:
+                            content = message.text.content.strip()
+                        elif message.message_type == "text":
+                            content = str(getattr(message, 'text', '')).strip()
 
-                    if sender_id:
-                        cfg = load_config()
-                        if cfg.get("dingtalk", {}).get("user_id") != sender_id:
-                            cfg["dingtalk"]["user_id"] = sender_id
-                            save_config(cfg)
-                            log(f"[dingtalk] 获取到 user_id: {sender_id}")
+                        sender_id = message.sender_staff_id or message.sender_id or ""
+                        log(f"[dingtalk] 收到消息 from {sender_id}: {content[:50]}")
 
-                    if content and PENDING_DIR.exists() and any(PENDING_DIR.glob("*.json")):
-                        _process_incoming_message(content, "dingtalk")
-                except Exception as e:
-                    log(f"[dingtalk] 处理消息异常: {e}")
+                        if sender_id:
+                            cfg = load_config()
+                            if cfg.get("dingtalk", {}).get("user_id") != sender_id:
+                                cfg["dingtalk"]["user_id"] = sender_id
+                                save_config(cfg)
+                                log(f"[dingtalk] 获取到 user_id: {sender_id}")
 
+                        if content and PENDING_DIR.exists() and any(PENDING_DIR.glob("*.json")):
+                            _process_incoming_message(content, "dingtalk")
+                    except Exception as e:
+                        log(f"[dingtalk] 处理消息异常: {e}")
+
+            client.register_callback_handler(BotHandler())
             log("[dingtalk] Stream 连接中...")
             client.start_forever()
 
@@ -696,7 +698,7 @@ def main():
 
     # 启动钉钉 Stream 线程（有凭据就启动，用于自动获取 user_id）
     dt_thread = None
-    if cfg.get("dingtalk", {}).get("app_key") and cfg.get("dingtalk", {}).get("app_secret"):
+    if cfg.get("dingtalk", {}).get("client_id") and cfg.get("dingtalk", {}).get("client_secret"):
         dt_thread = threading.Thread(target=dingtalk_thread_entry, daemon=True)
         dt_thread.start()
         log("[dingtalk] Stream 监听线程已启动")
