@@ -287,7 +287,7 @@
         <div>
           <h3 class="text-lg font-semibold text-gray-900 dark:text-white">交互模式</h3>
           <p class="text-sm text-gray-500 dark:text-gray-400">
-            开启后，审批通知可直接通过终端/微信/QQ 回复
+            开启后，审批通知可直接通过终端、微信、QQ、飞书、钉钉、Telegram 回复
           </p>
         </div>
         <button
@@ -303,12 +303,18 @@
       </div>
       <div x-show="interactionEnabled" x-transition class="space-y-3 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
         <div class="flex items-center justify-between">
-          <label class="text-sm text-gray-600 dark:text-gray-400">超时（秒，0=无限）</label>
+          <div>
+            <label class="text-sm text-gray-600 dark:text-gray-400">超时（秒，0=无限）</label>
+            <p class="text-xs text-gray-400 dark:text-gray-500">等待用户回复的时间，超时后自动取消请求并继续执行。设为 0 则一直等待直到收到回复。</p>
+          </div>
           <input type="number" x-model.number="interactionTimeout" @change="saveInteraction()" min="0"
             class="w-24 px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white">
         </div>
         <div class="flex items-center justify-between">
-          <label class="text-sm text-gray-600 dark:text-gray-400">终端显示选项</label>
+          <div>
+            <label class="text-sm text-gray-600 dark:text-gray-400">终端显示选项</label>
+            <p class="text-xs text-gray-400 dark:text-gray-500">开启后，Claude Code 终端会显示可选选项供直接输入回复；关闭则仅通过手机端渠道回复。</p>
+          </div>
           <button @click="interactionShowTerminal = !interactionShowTerminal; saveInteraction()"
             :class="interactionShowTerminal ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
             class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors">
