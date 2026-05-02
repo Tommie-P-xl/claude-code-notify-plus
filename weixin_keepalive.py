@@ -579,19 +579,23 @@ def feishu_websocket_loop():
             )
             log("[feishu] WebSocket 连接中...")
 
-            # 在独立线程中启动 WebSocket，主线程运行看门狗
-            ws_thread = threading.Thread(target=ws_client.start, daemon=True)
-            ws_thread.start()
+            # 看门狗：在守护线程中监控消息活跃度
+            def _feishu_watchdog():
+                while True:
+                    time.sleep(60)
+                    elapsed = time.time() - last_message_time
+                    if elapsed > WATCHDOG_TIMEOUT:
+                        log(f"[feishu] WebSocket 超过 {WATCHDOG_TIMEOUT}s 无消息，强制重连")
+                        try:
+                            ws_client._Client__ws_client and ws_client._Client__ws_client.close()
+                        except Exception:
+                            pass
+                        break
 
-            # 看门狗循环：检测连接是否静默断开
-            while ws_thread.is_alive():
-                time.sleep(10)
-                elapsed = time.time() - last_message_time
-                if elapsed > WATCHDOG_TIMEOUT:
-                    log(f"[feishu] WebSocket 超过 {WATCHDOG_TIMEOUT}s 无消息，强制重连")
-                    break
-            else:
-                log("[feishu] WebSocket 线程已退出，重连中...")
+            threading.Thread(target=_feishu_watchdog, daemon=True).start()
+
+            # 主线程阻塞调用 start()（lark-oapi 内部使用模块级 event loop，不能在子线程运行）
+            ws_client.start()
 
         except Exception as e:
             log(f"[feishu] WebSocket 异常: {e}")
@@ -672,17 +676,23 @@ def dingtalk_stream_loop():
             client.register_callback_handler(dingtalk_stream.ChatbotMessage.TOPIC, BotHandler())
             log("[dingtalk] Stream 连接中...")
 
-            stream_thread = threading.Thread(target=client.start_forever, daemon=True)
-            stream_thread.start()
+            # 看门狗：在守护线程中监控消息活跃度
+            def _dingtalk_watchdog():
+                while True:
+                    time.sleep(60)
+                    elapsed = time.time() - last_message_time
+                    if elapsed > WATCHDOG_TIMEOUT:
+                        log(f"[dingtalk] Stream 超过 {WATCHDOG_TIMEOUT}s 无消息，强制重连")
+                        try:
+                            client.close()
+                        except Exception:
+                            pass
+                        break
 
-            while stream_thread.is_alive():
-                time.sleep(10)
-                elapsed = time.time() - last_message_time
-                if elapsed > WATCHDOG_TIMEOUT:
-                    log(f"[dingtalk] Stream 超过 {WATCHDOG_TIMEOUT}s 无消息，强制重连")
-                    break
-            else:
-                log("[dingtalk] Stream 线程已退出，重连中...")
+            threading.Thread(target=_dingtalk_watchdog, daemon=True).start()
+
+            # 主线程阻塞调用 start_forever()
+            client.start_forever()
 
         except Exception as e:
             log(f"[dingtalk] Stream 异常: {e}")
