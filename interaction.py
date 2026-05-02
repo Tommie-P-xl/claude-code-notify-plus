@@ -61,6 +61,7 @@ def parse_reply(reply: str, pending: dict) -> str:
     - permission_select: 按选项列表映射
     - Elicitation 单选: 选项文本 / 自定义文本
     - Elicitation 多选: 逗号分隔的选项文本
+    - 多问题: 用 | 分隔每个问题的答案，返回 JSON dict
     """
     reply = reply.strip()
     option_type = pending.get("option_type", "approve_deny")
@@ -76,6 +77,12 @@ def parse_reply(reply: str, pending: dict) -> str:
 
     if option_type == "permission_select":
         return _parse_permission_select(reply, options)
+
+    # 检查是否为多问题（含 | 分隔符）
+    tool_input = pending.get("tool_input", {})
+    questions = tool_input.get("questions", []) if isinstance(tool_input, dict) else []
+    if len(questions) > 1 and "|" in reply:
+        return _parse_multi_question_reply(reply, questions)
 
     if option_type in ("single_select", ""):
         return _parse_single_select(reply, options, pending.get("allow_custom", False))
@@ -140,6 +147,35 @@ def _parse_multi_select(reply: str, options: list) -> str:
         else:
             selected.append(part)
     return ",".join(selected) if selected else reply
+
+
+def _parse_multi_question_reply(reply: str, questions: list) -> str:
+    """
+    解析多问题回复（用 | 分隔每个问题的答案）。
+    返回 JSON dict 字符串，key 为 field_name，value 为答案文本。
+    例: "1,3|2" → '{"q1": "Python,Rust", "q2": "Git"}'
+    """
+    parts = [p.strip() for p in reply.split("|")]
+    result = {}
+    for i, q in enumerate(questions):
+        field = q.get("field", f"q{i}")
+        q_options = []
+        for o in q.get("options", []):
+            label = o.get("label", "") or o.get("description", "")
+            q_options.append(label)
+        is_multi = q.get("multiSelect", False)
+
+        if i < len(parts) and parts[i]:
+            part = parts[i].replace("，", ",")
+            if is_multi:
+                parsed = _parse_multi_select(part, q_options)
+            else:
+                parsed = _parse_single_select(part, q_options, True)
+            result[field] = parsed
+        else:
+            result[field] = ""
+
+    return json.dumps(result, ensure_ascii=False)
 
 
 def _extract_reply_parts(text: str) -> tuple[str, str]:
@@ -385,10 +421,21 @@ def format_hook_response(reply_text: str, hook_event: str = "", question: str = 
             })
 
     if hook_event == "Elicitation":
-        field_name = question if question else "response"
-        updated_input = {
-            "answers": {field_name: reply_text.strip()}
-        }
+        # 检查是否为多问题 JSON dict 回复
+        answers = {}
+        stripped = reply_text.strip()
+        if stripped.startswith("{"):
+            try:
+                answers = _json.loads(stripped)
+            except _json.JSONDecodeError:
+                pass
+
+        if not answers:
+            # 单问题：使用原有逻辑
+            field_name = question if question else "response"
+            answers = {field_name: stripped}
+
+        updated_input = {"answers": answers}
         # Echo back the original questions array (Claude Code needs it)
         questions = tool_input.get("questions", [])
         if questions:
@@ -440,30 +487,74 @@ def format_notification_message(pending: dict) -> str:
         lines.append(f"回复: {label} 1（字母为请求编号，数字为选项）")
 
     elif option_type == "multi_select":
-        title = f"需要选择 #{label}（多选）"
-        lines.append(f"【Claude Code - {title}】")
-        if context:
-            lines.append(context)
-        lines.append("")
-        for i, opt in enumerate(options, 1):
-            lines.append(f"  {i} - {opt}")
-        lines.append("  0 - 其他")
-        lines.append("")
-        lines.append(f"多选用逗号分隔，如: {label} 1,3")
-        lines.append(f"回复: {label} <选项>")
+        # 检查是否有多个问题（AskUserQuestion 可能包含多个问题）
+        tool_input = pending.get("tool_input", {})
+        questions = tool_input.get("questions", []) if isinstance(tool_input, dict) else []
+
+        if len(questions) > 1:
+            title = f"需要选择 #{label}（多题多选）"
+            lines.append(f"【Claude Code - {title}】")
+            if context:
+                lines.append(context)
+            lines.append("")
+            for qi, q in enumerate(questions):
+                q_text = q.get("question", f"问题 {qi+1}")
+                lines.append(f"  [{qi+1}] {q_text}")
+                for i, o in enumerate(q.get("options", []), 1):
+                    opt_label = o.get("label", "") or o.get("description", "")
+                    lines.append(f"      {i} - {opt_label}")
+                lines.append("")
+            lines.append(f"多选用逗号分隔，多题用 | 分隔")
+            lines.append(f"回复: {label} 1,3|2  （第1题选1,3；第2题选2）")
+            lines.append(f"只答一题: {label} 1,3  （默认回答第1题）")
+        else:
+            title = f"需要选择 #{label}（多选）"
+            lines.append(f"【Claude Code - {title}】")
+            if context:
+                lines.append(context)
+            lines.append("")
+            for i, opt in enumerate(options, 1):
+                lines.append(f"  {i} - {opt}")
+            lines.append("  0 - 其他")
+            lines.append("")
+            lines.append(f"多选用逗号分隔，如: {label} 1,3")
+            lines.append(f"回复: {label} <选项>")
 
     else:  # single_select
-        title = f"需要选择 #{label}"
-        lines.append(f"【Claude Code - {title}】")
-        if context:
-            lines.append(context)
-        lines.append("")
-        for i, opt in enumerate(options, 1):
-            lines.append(f"  {i} - {opt}")
-        if pending.get("allow_custom", False):
-            lines.append("  0 - 其他（直接输入自定义内容）")
-        lines.append("")
-        lines.append(f"回复: {label} 1")
+        # 检查是否有多个问题
+        tool_input = pending.get("tool_input", {})
+        questions = tool_input.get("questions", []) if isinstance(tool_input, dict) else []
+
+        if len(questions) > 1:
+            title = f"需要选择 #{label}（多题）"
+            lines.append(f"【Claude Code - {title}】")
+            if context:
+                lines.append(context)
+            lines.append("")
+            for qi, q in enumerate(questions):
+                q_text = q.get("question", f"问题 {qi+1}")
+                lines.append(f"  [{qi+1}] {q_text}")
+                for i, o in enumerate(q.get("options", []), 1):
+                    opt_label = o.get("label", "") or o.get("description", "")
+                    lines.append(f"      {i} - {opt_label}")
+                if q.get("allowCustom", True):
+                    lines.append(f"      0 - 其他")
+                lines.append("")
+            lines.append(f"多题用 | 分隔")
+            lines.append(f"回复: {label} 1|2  （第1题选1；第2题选2）")
+            lines.append(f"只答一题: {label} 1  （默认回答第1题）")
+        else:
+            title = f"需要选择 #{label}"
+            lines.append(f"【Claude Code - {title}】")
+            if context:
+                lines.append(context)
+            lines.append("")
+            for i, opt in enumerate(options, 1):
+                lines.append(f"  {i} - {opt}")
+            if pending.get("allow_custom", False):
+                lines.append("  0 - 其他（直接输入自定义内容）")
+            lines.append("")
+            lines.append(f"回复: {label} 1")
 
     lines.append("终端/微信/QQ 均可回复，先到先生效。")
     return "\n".join(lines)
