@@ -535,14 +535,19 @@ def feishu_websocket_loop():
             break
 
         try:
-            event_handler = lark.EventDispatcherHandler.builder("", "")
-
-            def on_message(ctx, config, event):
+            def on_message(data):
                 try:
-                    msg = event.event.message
-                    sender = event.event.sender
+                    msg = data.event.message
+                    sender = data.event.sender
                     open_id = sender.sender_id.open_id if sender and sender.sender_id else ""
-                    content = json.loads(msg.content).get("text", "").strip() if msg.content else ""
+                    content = ""
+                    if msg.content:
+                        try:
+                            content = json.loads(msg.content).get("text", "").strip()
+                        except json.JSONDecodeError:
+                            pass
+
+                    log(f"[feishu] 收到消息 from {open_id}: {content[:50]}")
 
                     if open_id:
                         cfg = load_config()
@@ -556,7 +561,7 @@ def feishu_websocket_loop():
                 except Exception as e:
                     log(f"[feishu] 处理消息异常: {e}")
 
-            event_handler.register_p2_im_message_receive_v1(on_message)
+            event_handler = lark.EventDispatcherHandler.builder("", "").register_p2_im_message_receive_v1(on_message).build()
 
             ws_client = WsClient(
                 app_id=app_id,
