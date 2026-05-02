@@ -454,7 +454,7 @@ def main():
         import interaction
 
         options_info = _extract_options(ctx)
-        interaction.cleanup_stale(300)  # 清理超过 5 分钟的过期请求
+        interaction.cleanup_stale()  # 清理已退出进程的残留请求
         pending = interaction.create_request(
             hook_event=hook_event,
             context_text=context_text,

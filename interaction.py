@@ -198,6 +198,7 @@ def create_request(
         "timeout": timeout,
         "question": question,
         "as_elicitation": as_elicitation,
+        "pid": os.getpid(),  # 记录 hook 进程 PID，用于判断请求是否活跃
     }
 
     pending_file = PENDING_DIR / f"{request_id}.json"
@@ -260,17 +261,36 @@ def cleanup_all():
             pass
 
 
-def cleanup_stale(max_age_seconds: int = 3600):
-    """清理超过 max_age_seconds 秒的 pending 请求（默认 1 小时）"""
+def _is_process_running(pid: int) -> bool:
+    """检查进程是否还在运行"""
+    if pid <= 0:
+        return False
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x1000, False, pid)
+            if handle:
+                kernel32.CloseHandle(handle)
+                return True
+            return False
+        else:
+            os.kill(pid, 0)
+            return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
+def cleanup_stale():
+    """清理 hook 进程已退出的残留 pending 请求（不影响活跃请求）"""
     _ensure_dirs()
-    now = time.time()
     for f in PENDING_DIR.glob("*.json"):
         try:
             req = json.loads(f.read_text(encoding="utf-8"))
-            created = req.get("created_at", 0)
-            if now - created > max_age_seconds:
+            pid = req.get("pid", 0)
+            # 只清理进程已退出的请求
+            if pid and not _is_process_running(pid):
                 f.unlink()
-                # 同时清理对应的 response 文件
                 resp = RESPONSE_DIR / f"{req.get('id', '')}.json"
                 resp.unlink(missing_ok=True)
         except Exception:
