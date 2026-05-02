@@ -1,5 +1,7 @@
 # Claude Code 遥控器 — 让 AI 干活，你去摸鱼
 
+[English](README_EN.md) | 中文
+
 > Claude Code 在电脑上写代码，你在手机上审批决策。终端、微信、QQ、飞书、钉钉、Telegram 六端联动，随时随地掌控 AI 工作流。
 
 当 Claude Code 需要你的输入时 — 无论是审批文件写入、选择技术方案，还是回答多选问题 — 你都可以直接在手机上回复，无需回到电脑前。
