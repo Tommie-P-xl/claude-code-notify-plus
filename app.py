@@ -115,6 +115,16 @@ def create_app() -> Flask:
         save_config(cfg)
         return jsonify({"ok": True, "message": "配置已保存"})
 
+    def _restart_keepalive():
+        """重启 keepalive 守护进程"""
+        try:
+            from channels.weixin import start_keepalive, stop_keepalive
+            stop_keepalive()
+            import time; time.sleep(1)
+            start_keepalive()
+        except Exception:
+            pass
+
     # --- 通知渠道开关 ---
     @app.route("/api/channel/<name>/toggle", methods=["POST"])
     def toggle_channel(name: str):
@@ -137,6 +147,15 @@ def create_app() -> Flask:
                     return jsonify({"ok": False, "error": "请先配置 QQ Bot AppID 和 AppSecret"}), 400
                 if not cfg["qq"].get("target_id"):
                     return jsonify({"ok": False, "error": "请先配置 Target ID"}), 400
+            elif name == "telegram":
+                if not cfg["telegram"].get("bot_token"):
+                    return jsonify({"ok": False, "error": "请先配置 Telegram Bot Token"}), 400
+            elif name == "feishu":
+                if not cfg["feishu"].get("app_id") or not cfg["feishu"].get("app_secret"):
+                    return jsonify({"ok": False, "error": "请先配置飞书 App ID / App Secret"}), 400
+            elif name == "dingtalk":
+                if not cfg["dingtalk"].get("app_key") or not cfg["dingtalk"].get("app_secret"):
+                    return jsonify({"ok": False, "error": "请先配置钉钉 App Key / App Secret"}), 400
 
         cfg[name]["enabled"] = enabled
         save_config(cfg)
@@ -228,13 +247,7 @@ def create_app() -> Flask:
                 cfg["qq"]["target_id"] = target_id
             save_config(cfg)
             # 强制重启 keepalive 守护进程（含 QQ WebSocket 监听）
-            try:
-                from channels.weixin import start_keepalive, stop_keepalive
-                stop_keepalive()
-                import time; time.sleep(1)
-                start_keepalive()
-            except Exception:
-                pass
+            _restart_keepalive()
         return jsonify(result)
 
     @app.route("/api/qq/status", methods=["GET"])
@@ -266,6 +279,117 @@ def create_app() -> Flask:
         cfg["qq"]["enabled"] = False
         save_config(cfg)
         return jsonify({"ok": True, "message": "QQ Bot 信息已清除"})
+
+    # --- Telegram 配置 ---
+    @app.route("/api/telegram/validate", methods=["POST"])
+    def telegram_validate():
+        from channels.telegram import TelegramChannel
+        from notify import load_config, save_config
+        data = request.get_json(force=True)
+        bot_token = data.get("bot_token", "").strip()
+        if not bot_token:
+            return jsonify({"ok": False, "error": "Bot Token 不能为空"}), 400
+
+        result = TelegramChannel.validate_credentials(bot_token)
+        if result.get("ok"):
+            cfg = load_config()
+            cfg["telegram"]["bot_token"] = bot_token
+            save_config(cfg)
+            _restart_keepalive()
+        return jsonify(result)
+
+    @app.route("/api/telegram/status", methods=["GET"])
+    def telegram_status():
+        from channels.telegram import TelegramChannel
+        from notify import load_config
+        cfg = load_config()
+        return jsonify(TelegramChannel.get_login_status(cfg))
+
+    @app.route("/api/telegram/logout", methods=["POST"])
+    def telegram_logout():
+        from notify import load_config, save_config
+        cfg = load_config()
+        cfg["telegram"]["bot_token"] = ""
+        cfg["telegram"]["chat_id"] = ""
+        cfg["telegram"]["enabled"] = False
+        save_config(cfg)
+        return jsonify({"ok": True, "message": "Telegram 信息已清除"})
+
+    # --- 飞书配置 ---
+    @app.route("/api/feishu/validate", methods=["POST"])
+    def feishu_validate():
+        from channels.feishu import FeishuChannel
+        from notify import load_config, save_config
+        data = request.get_json(force=True)
+        app_id = data.get("app_id", "").strip()
+        app_secret = data.get("app_secret", "").strip()
+        if not app_id or not app_secret:
+            return jsonify({"ok": False, "error": "App ID 和 App Secret 不能为空"}), 400
+
+        result = FeishuChannel.validate_credentials(app_id, app_secret)
+        if result.get("ok"):
+            cfg = load_config()
+            cfg["feishu"]["app_id"] = app_id
+            cfg["feishu"]["app_secret"] = app_secret
+            save_config(cfg)
+            _restart_keepalive()
+        return jsonify(result)
+
+    @app.route("/api/feishu/status", methods=["GET"])
+    def feishu_status():
+        from channels.feishu import FeishuChannel
+        from notify import load_config
+        cfg = load_config()
+        return jsonify(FeishuChannel.get_login_status(cfg))
+
+    @app.route("/api/feishu/logout", methods=["POST"])
+    def feishu_logout():
+        from notify import load_config, save_config
+        cfg = load_config()
+        cfg["feishu"]["app_id"] = ""
+        cfg["feishu"]["app_secret"] = ""
+        cfg["feishu"]["receive_id"] = ""
+        cfg["feishu"]["enabled"] = False
+        save_config(cfg)
+        return jsonify({"ok": True, "message": "飞书信息已清除"})
+
+    # --- 钉钉配置 ---
+    @app.route("/api/dingtalk/validate", methods=["POST"])
+    def dingtalk_validate():
+        from channels.dingtalk import DingTalkChannel
+        from notify import load_config, save_config
+        data = request.get_json(force=True)
+        app_key = data.get("app_key", "").strip()
+        app_secret = data.get("app_secret", "").strip()
+        if not app_key or not app_secret:
+            return jsonify({"ok": False, "error": "App Key 和 App Secret 不能为空"}), 400
+
+        result = DingTalkChannel.validate_credentials(app_key, app_secret)
+        if result.get("ok"):
+            cfg = load_config()
+            cfg["dingtalk"]["app_key"] = app_key
+            cfg["dingtalk"]["app_secret"] = app_secret
+            save_config(cfg)
+            _restart_keepalive()
+        return jsonify(result)
+
+    @app.route("/api/dingtalk/status", methods=["GET"])
+    def dingtalk_status():
+        from channels.dingtalk import DingTalkChannel
+        from notify import load_config
+        cfg = load_config()
+        return jsonify(DingTalkChannel.get_login_status(cfg))
+
+    @app.route("/api/dingtalk/logout", methods=["POST"])
+    def dingtalk_logout():
+        from notify import load_config, save_config
+        cfg = load_config()
+        cfg["dingtalk"]["app_key"] = ""
+        cfg["dingtalk"]["app_secret"] = ""
+        cfg["dingtalk"]["user_id"] = ""
+        cfg["dingtalk"]["enabled"] = False
+        save_config(cfg)
+        return jsonify({"ok": True, "message": "钉钉信息已清除"})
 
     # --- Hooks 管理 ---
     @app.route("/api/hooks", methods=["GET"])
