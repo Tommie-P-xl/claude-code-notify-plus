@@ -161,6 +161,13 @@ def _process_incoming_message(text: str, channel: str):
     if not target_pending:
         return
 
+    # 防抖：无标签消息在请求创建 3 秒内到达，视为旧消息（微信 getupdates 等渠道可能返回排队的旧消息）
+    if not label:
+        created_at = target_pending.get("created_at", 0)
+        if created_at and (time.time() - created_at) < 3:
+            log(f"[{channel}] 跳过旧消息（请求创建仅 {time.time() - created_at:.1f}s）: {text[:30]}")
+            return
+
     request_id = target_pending["id"]
 
     # 原子写入 response
