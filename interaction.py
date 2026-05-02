@@ -78,10 +78,10 @@ def parse_reply(reply: str, pending: dict) -> str:
     if option_type == "permission_select":
         return _parse_permission_select(reply, options)
 
-    # 检查是否为多问题（含 | 分隔符）
+    # 检查是否为多问题（含 | 。 . 分隔符）
     tool_input = pending.get("tool_input", {})
     questions = tool_input.get("questions", []) if isinstance(tool_input, dict) else []
-    if len(questions) > 1 and "|" in reply:
+    if len(questions) > 1 and any(c in reply for c in ("|", "。", ".")):
         return _parse_multi_question_reply(reply, questions)
 
     if option_type in ("single_select", ""):
@@ -151,11 +151,12 @@ def _parse_multi_select(reply: str, options: list) -> str:
 
 def _parse_multi_question_reply(reply: str, questions: list) -> str:
     """
-    解析多问题回复（用 | 分隔每个问题的答案）。
+    解析多问题回复（用 | 。或. 分隔每个问题的答案）。
     返回 JSON dict 字符串，key 为 field_name，value 为答案文本。
-    例: "1,3|2" → '{"q1": "Python,Rust", "q2": "Git"}'
+    例: "1,3|2" 或 "1,3。2" 或 "1,3.2" → '{"q1": "Python,Rust", "q2": "Git"}'
     """
-    parts = [p.strip() for p in reply.split("|")]
+    import re
+    parts = [p.strip() for p in re.split(r'[|。.]', reply) if p.strip()]
     result = {}
     for i, q in enumerate(questions):
         field = q.get("field", f"q{i}")
@@ -504,7 +505,7 @@ def format_notification_message(pending: dict) -> str:
                     opt_label = o.get("label", "") or o.get("description", "")
                     lines.append(f"      {i} - {opt_label}")
                 lines.append("")
-            lines.append(f"多选用逗号分隔，多题用 | 分隔")
+            lines.append(f"多选用逗号分隔，多题用 | 或。分隔")
             lines.append(f"回复: {label} 1,3|2  （第1题选1,3；第2题选2）")
             lines.append(f"只答一题: {label} 1,3  （默认回答第1题）")
         else:
@@ -540,7 +541,7 @@ def format_notification_message(pending: dict) -> str:
                 if q.get("allowCustom", True):
                     lines.append(f"      0 - 其他")
                 lines.append("")
-            lines.append(f"多题用 | 分隔")
+            lines.append(f"多题用 | 或。分隔")
             lines.append(f"回复: {label} 1|2  （第1题选1；第2题选2）")
             lines.append(f"只答一题: {label} 1  （默认回答第1题）")
         else:
