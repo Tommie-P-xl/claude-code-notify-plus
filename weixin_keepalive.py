@@ -450,10 +450,9 @@ def telegram_poll_loop():
         cfg = load_config()
         tg = cfg.get("telegram", {})
         bot_token = tg.get("bot_token", "")
-        enabled = tg.get("enabled", False)
 
-        if not enabled or not bot_token:
-            log("[telegram] Telegram 未启用或配置不完整，监听退出")
+        if not bot_token:
+            log("[telegram] Telegram 配置不完整，监听退出")
             break
 
         url = f"https://api.telegram.org/bot{bot_token}/getUpdates?timeout=30&offset={offset}"
@@ -530,10 +529,9 @@ def feishu_websocket_loop():
         fs = cfg.get("feishu", {})
         app_id = fs.get("app_id", "")
         app_secret = fs.get("app_secret", "")
-        enabled = fs.get("enabled", False)
 
-        if not enabled or not app_id or not app_secret:
-            log("[feishu] 飞书未启用或配置不完整，监听退出")
+        if not app_id or not app_secret:
+            log("[feishu] 飞书配置不完整，监听退出")
             break
 
         try:
@@ -599,10 +597,9 @@ def dingtalk_stream_loop():
         dt = cfg.get("dingtalk", {})
         app_key = dt.get("app_key", "")
         app_secret = dt.get("app_secret", "")
-        enabled = dt.get("enabled", False)
 
-        if not enabled or not app_key or not app_secret:
-            log("[dingtalk] 钉钉未启用或配置不完整，监听退出")
+        if not app_key or not app_secret:
+            log("[dingtalk] 钉钉配置不完整，监听退出")
             break
 
         try:
@@ -678,23 +675,23 @@ def main():
         qq_thread.start()
         log("[qq] WebSocket 监听线程已启动")
 
-    # 启动 Telegram 长轮询线程
+    # 启动 Telegram 长轮询线程（有 token 就启动，用于自动获取 chat_id）
     tg_thread = None
-    if cfg.get("telegram", {}).get("enabled") and cfg.get("telegram", {}).get("bot_token"):
+    if cfg.get("telegram", {}).get("bot_token"):
         tg_thread = threading.Thread(target=telegram_thread_entry, daemon=True)
         tg_thread.start()
         log("[telegram] 长轮询监听线程已启动")
 
-    # 启动飞书 WebSocket 线程
+    # 启动飞书 WebSocket 线程（有凭据就启动，用于自动获取 open_id）
     fs_thread = None
-    if cfg.get("feishu", {}).get("enabled") and cfg.get("feishu", {}).get("app_id") and cfg.get("feishu", {}).get("app_secret"):
+    if cfg.get("feishu", {}).get("app_id") and cfg.get("feishu", {}).get("app_secret"):
         fs_thread = threading.Thread(target=feishu_thread_entry, daemon=True)
         fs_thread.start()
         log("[feishu] WebSocket 监听线程已启动")
 
-    # 启动钉钉 Stream 线程
+    # 启动钉钉 Stream 线程（有凭据就启动，用于自动获取 user_id）
     dt_thread = None
-    if cfg.get("dingtalk", {}).get("enabled") and cfg.get("dingtalk", {}).get("app_key") and cfg.get("dingtalk", {}).get("app_secret"):
+    if cfg.get("dingtalk", {}).get("app_key") and cfg.get("dingtalk", {}).get("app_secret"):
         dt_thread = threading.Thread(target=dingtalk_thread_entry, daemon=True)
         dt_thread.start()
         log("[dingtalk] Stream 监听线程已启动")
