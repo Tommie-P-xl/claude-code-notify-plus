@@ -436,6 +436,219 @@ def qq_thread_entry():
         log(f"[qq] 线程异常退出: {e}")
 
 
+# ========== Telegram Long Polling ==========
+
+def telegram_poll_loop():
+    """Telegram Bot 长轮询监听，自动获取 chat_id"""
+    import urllib.request
+    import urllib.error
+
+    offset = 0
+    consecutive_failures = 0
+
+    while True:
+        cfg = load_config()
+        tg = cfg.get("telegram", {})
+        bot_token = tg.get("bot_token", "")
+        enabled = tg.get("enabled", False)
+
+        if not enabled or not bot_token:
+            log("[telegram] Telegram 未启用或配置不完整，监听退出")
+            break
+
+        url = f"https://api.telegram.org/bot{bot_token}/getUpdates?timeout=30&offset={offset}"
+        req = urllib.request.Request(url, method="GET")
+
+        try:
+            resp = urllib.request.urlopen(req, timeout=35)
+            data = json.loads(resp.read().decode("utf-8"))
+
+            if data.get("ok"):
+                results = data.get("result", [])
+                for update in results:
+                    offset = update.get("update_id", offset) + 1
+                    msg = update.get("message", {})
+                    chat = msg.get("chat", {})
+                    chat_id = str(chat.get("id", ""))
+                    text = msg.get("text", "").strip()
+
+                    if chat_id:
+                        cfg = load_config()
+                        if cfg.get("telegram", {}).get("chat_id") != chat_id:
+                            cfg["telegram"]["chat_id"] = chat_id
+                            save_config(cfg)
+                            log(f"[telegram] 获取到 chat_id: {chat_id}")
+
+                    if text and PENDING_DIR.exists() and any(PENDING_DIR.glob("*.json")):
+                        _process_incoming_message(text, "telegram")
+
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+                log(f"[telegram] getUpdates 失败: {data}")
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    break
+                time.sleep(5)
+
+        except urllib.error.URLError as e:
+            if "timed out" in str(e.reason).lower() or "timeout" in str(e.reason).lower():
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    break
+                time.sleep(5)
+        except Exception as e:
+            consecutive_failures += 1
+            log(f"[telegram] 异常: {e}")
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                break
+            time.sleep(5)
+
+
+def telegram_thread_entry():
+    """Telegram 长轮询线程入口"""
+    try:
+        telegram_poll_loop()
+    except Exception as e:
+        log(f"[telegram] 线程异常退出: {e}")
+
+
+# ========== Feishu WebSocket ==========
+
+def feishu_websocket_loop():
+    """飞书 WebSocket 长连接监听，自动获取 open_id"""
+    try:
+        import lark_oapi as lark
+        from lark_oapi.adapter.websocket import WebSocketClient
+    except ImportError:
+        log("[feishu] lark-oapi 未安装，跳过飞书监听")
+        return
+
+    while True:
+        cfg = load_config()
+        fs = cfg.get("feishu", {})
+        app_id = fs.get("app_id", "")
+        app_secret = fs.get("app_secret", "")
+        enabled = fs.get("enabled", False)
+
+        if not enabled or not app_id or not app_secret:
+            log("[feishu] 飞书未启用或配置不完整，监听退出")
+            break
+
+        try:
+            event_handler = lark.EventDispatcherHandler.builder("", "")
+
+            def on_message(ctx, config, event):
+                try:
+                    msg = event.event.message
+                    sender = event.event.sender
+                    open_id = sender.sender_id.open_id if sender and sender.sender_id else ""
+                    content = json.loads(msg.content).get("text", "").strip() if msg.content else ""
+
+                    if open_id:
+                        cfg = load_config()
+                        if cfg.get("feishu", {}).get("receive_id") != open_id:
+                            cfg["feishu"]["receive_id"] = open_id
+                            save_config(cfg)
+                            log(f"[feishu] 获取到 open_id: {open_id}")
+
+                    if content and PENDING_DIR.exists() and any(PENDING_DIR.glob("*.json")):
+                        _process_incoming_message(content, "feishu")
+                except Exception as e:
+                    log(f"[feishu] 处理消息异常: {e}")
+
+            event_handler.register_p2_im_message_receive_v1(on_message)
+
+            ws_client = WebSocketClient(
+                app_id=app_id,
+                app_secret=app_secret,
+                event_handler=event_handler,
+                log_level=lark.LogLevel.WARNING,
+            )
+            log("[feishu] WebSocket 连接中...")
+            ws_client.start()
+
+        except Exception as e:
+            log(f"[feishu] WebSocket 异常: {e}")
+            time.sleep(10)
+            continue
+
+
+def feishu_thread_entry():
+    """飞书 WebSocket 线程入口"""
+    try:
+        feishu_websocket_loop()
+    except Exception as e:
+        log(f"[feishu] 线程异常退出: {e}")
+
+
+# ========== DingTalk Stream ==========
+
+def dingtalk_stream_loop():
+    """钉钉 Stream 长连接监听，自动获取 user_id"""
+    try:
+        import dingtalk_stream
+        from dingtalk_stream import DingTalkStreamClient
+    except ImportError:
+        log("[dingtalk] dingtalk-stream 未安装，跳过钉钉监听")
+        return
+
+    while True:
+        cfg = load_config()
+        dt = cfg.get("dingtalk", {})
+        app_key = dt.get("app_key", "")
+        app_secret = dt.get("app_secret", "")
+        enabled = dt.get("enabled", False)
+
+        if not enabled or not app_key or not app_secret:
+            log("[dingtalk] 钉钉未启用或配置不完整，监听退出")
+            break
+
+        try:
+            client = DingTalkStreamClient(app_key, app_secret)
+
+            @client.register_callback_handler
+            def on_message(data):
+                try:
+                    content = ""
+                    sender_id = ""
+                    if isinstance(data, dict):
+                        content = data.get("text", {}).get("content", "").strip()
+                        sender_id = data.get("senderStaffId", "") or data.get("senderId", "")
+                    else:
+                        content = getattr(data, "text", {}).get("content", "").strip() if hasattr(data, "text") else ""
+                        sender_id = getattr(data, "sender_staff_id", "") or getattr(data, "sender_id", "")
+
+                    if sender_id:
+                        cfg = load_config()
+                        if cfg.get("dingtalk", {}).get("user_id") != sender_id:
+                            cfg["dingtalk"]["user_id"] = sender_id
+                            save_config(cfg)
+                            log(f"[dingtalk] 获取到 user_id: {sender_id}")
+
+                    if content and PENDING_DIR.exists() and any(PENDING_DIR.glob("*.json")):
+                        _process_incoming_message(content, "dingtalk")
+                except Exception as e:
+                    log(f"[dingtalk] 处理消息异常: {e}")
+
+            log("[dingtalk] Stream 连接中...")
+            client.start_forever()
+
+        except Exception as e:
+            log(f"[dingtalk] Stream 异常: {e}")
+            time.sleep(10)
+            continue
+
+
+def dingtalk_thread_entry():
+    """钉钉 Stream 线程入口"""
+    try:
+        dingtalk_stream_loop()
+    except Exception as e:
+        log(f"[dingtalk] 线程异常退出: {e}")
+
+
 # ========== 主入口 ==========
 
 def cleanup(signum=None, frame=None):
@@ -465,12 +678,33 @@ def main():
         qq_thread.start()
         log("[qq] WebSocket 监听线程已启动")
 
+    # 启动 Telegram 长轮询线程
+    tg_thread = None
+    if cfg.get("telegram", {}).get("enabled") and cfg.get("telegram", {}).get("bot_token"):
+        tg_thread = threading.Thread(target=telegram_thread_entry, daemon=True)
+        tg_thread.start()
+        log("[telegram] 长轮询监听线程已启动")
+
+    # 启动飞书 WebSocket 线程
+    fs_thread = None
+    if cfg.get("feishu", {}).get("enabled") and cfg.get("feishu", {}).get("app_id") and cfg.get("feishu", {}).get("app_secret"):
+        fs_thread = threading.Thread(target=feishu_thread_entry, daemon=True)
+        fs_thread.start()
+        log("[feishu] WebSocket 监听线程已启动")
+
+    # 启动钉钉 Stream 线程
+    dt_thread = None
+    if cfg.get("dingtalk", {}).get("enabled") and cfg.get("dingtalk", {}).get("app_key") and cfg.get("dingtalk", {}).get("app_secret"):
+        dt_thread = threading.Thread(target=dingtalk_thread_entry, daemon=True)
+        dt_thread.start()
+        log("[dingtalk] Stream 监听线程已启动")
+
     try:
         weixin_keepalive_loop()
-        # 微信保活退出后，如果 QQ 线程还在运行，主线程不能退出
-        if qq_thread and qq_thread.is_alive():
-            log("[qq] 微信保活已退出，继续等待 QQ 监听线程...")
-            qq_thread.join()
+        # 微信保活退出后，等待所有监听线程退出
+        for t in [qq_thread, tg_thread, fs_thread, dt_thread]:
+            if t and t.is_alive():
+                t.join()
     except KeyboardInterrupt:
         pass
     finally:
