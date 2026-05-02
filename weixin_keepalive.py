@@ -519,7 +519,7 @@ def feishu_websocket_loop():
     """飞书 WebSocket 长连接监听，自动获取 open_id"""
     try:
         import lark_oapi as lark
-        from lark_oapi.adapter.websocket import WebSocketClient
+        from lark_oapi.ws import Client as WsClient
     except ImportError:
         log("[feishu] lark-oapi 未安装，跳过飞书监听")
         return
@@ -558,7 +558,7 @@ def feishu_websocket_loop():
 
             event_handler.register_p2_im_message_receive_v1(on_message)
 
-            ws_client = WebSocketClient(
+            ws_client = WsClient(
                 app_id=app_id,
                 app_secret=app_secret,
                 event_handler=event_handler,
