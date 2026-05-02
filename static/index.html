@@ -570,10 +570,23 @@
           <input type="password" x-model="tgForm.bot_token" placeholder="从 @BotFather 获取"
                  class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
         </div>
-        <button @click="validateTg()" class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium">验证并保存</button>
+        <button @click="validateTg()" :disabled="tgWaitingChatId"
+                class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium disabled:opacity-50">
+          <span x-show="!tgWaitingChatId">验证并保存</span>
+          <span x-show="tgWaitingChatId">等待获取 Chat ID...</span>
+        </button>
+
+        <div x-show="tgWaitingChatId" class="mt-4 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+          <div class="flex items-start gap-2">
+            <svg class="animate-spin w-4 h-4 text-amber-400 mt-0.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" opacity="0.3"/><path fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"/></svg>
+            <div class="text-xs text-amber-200/90">
+              <div class="font-medium mb-1">正在等待获取 Chat ID...</div>
+              <div>请在 Telegram 中找到你的 Bot 并发送一条消息（如"你好"），系统会自动捕获 Chat ID。</div>
+              <div class="mt-1 text-amber-300/60">超时时间 2 分钟，也可手动填入 Chat ID。</div>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
-  </div>
 
   <!-- ==================== 飞书 Tab ==================== -->
   <div x-show="currentTab === 'feishu'" x-cloak>
@@ -623,7 +636,22 @@
                    class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
           </div>
         </div>
-        <button @click="validateFs()" class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium">验证并保存</button>
+        <button @click="validateFs()" :disabled="fsWaitingOpenId"
+                class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium disabled:opacity-50">
+          <span x-show="!fsWaitingOpenId">验证并保存</span>
+          <span x-show="fsWaitingOpenId">等待获取 Open ID...</span>
+        </button>
+
+        <div x-show="fsWaitingOpenId" class="mt-4 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+          <div class="flex items-start gap-2">
+            <svg class="animate-spin w-4 h-4 text-amber-400 mt-0.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" opacity="0.3"/><path fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"/></svg>
+            <div class="text-xs text-amber-200/90">
+              <div class="font-medium mb-1">正在等待获取 Open ID...</div>
+              <div>请在飞书中找到你的 Bot 并发送一条消息（如"你好"），系统会自动捕获 Open ID。</div>
+              <div class="mt-1 text-amber-300/60">超时时间 2 分钟。</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -676,10 +704,23 @@
                    class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
           </div>
         </div>
-        <button @click="validateDt()" class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium">验证并保存</button>
+        <button @click="validateDt()" :disabled="dtWaitingUserId"
+                class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium disabled:opacity-50">
+          <span x-show="!dtWaitingUserId">验证并保存</span>
+          <span x-show="dtWaitingUserId">等待获取 User ID...</span>
+        </button>
+
+        <div x-show="dtWaitingUserId" class="mt-4 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+          <div class="flex items-start gap-2">
+            <svg class="animate-spin w-4 h-4 text-amber-400 mt-0.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" opacity="0.3"/><path fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"/></svg>
+            <div class="text-xs text-amber-200/90">
+              <div class="font-medium mb-1">正在等待获取 User ID...</div>
+              <div>请在钉钉中找到你的 Bot 并发送一条消息（如"你好"），系统会自动捕获 User ID。</div>
+              <div class="mt-1 text-amber-300/60">超时时间 2 分钟。</div>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
-  </div>
 
   <!-- ==================== Hooks Tab ==================== -->
   <div x-show="currentTab === 'hooks'" x-cloak>
@@ -793,10 +834,16 @@ function app() {
     qqForm: { app_id: '', app_secret: '', target_id: '' },
     tgForm: { bot_token: '' },
     tgStatus: {},
+    tgWaitingChatId: false,
+    _tgPollTimer: null,
     fsForm: { app_id: '', app_secret: '' },
     fsStatus: {},
+    fsWaitingOpenId: false,
+    _fsPollTimer: null,
     dtForm: { app_key: '', app_secret: '' },
     dtStatus: {},
+    dtWaitingUserId: false,
+    _dtPollTimer: null,
     qqValidating: false,
     qqWaitingOpenId: false,
     permMode: 'default',
@@ -1124,12 +1171,37 @@ function app() {
         const r = await this.api('POST', '/api/telegram/validate', { bot_token: this.tgForm.bot_token });
         if (r.ok) {
           this.tgForm.bot_token = '';
-          this.tgStatus = { logged_in: true, message: r.message };
           this.toast('success', 'Telegram 验证成功', r.message);
+          // 检查是否已有 chat_id
+          await this.refreshTgStatus();
+          if (!this.tgStatus.chat_id) {
+            this.tgWaitingChatId = true;
+            this._startTgPoll();
+          }
         } else {
           this.toast('error', '验证失败', r.error);
         }
       } catch (e) { this.toast('error', '验证失败', e.message); }
+    },
+    _startTgPoll() {
+      if (this._tgPollTimer) clearInterval(this._tgPollTimer);
+      this._tgPollTimer = setInterval(async () => {
+        await this.refreshTgStatus();
+        if (this.tgStatus.chat_id) {
+          this.tgWaitingChatId = false;
+          clearInterval(this._tgPollTimer);
+          this._tgPollTimer = null;
+          this.toast('success', 'Chat ID 已获取', this.tgStatus.chat_id);
+        }
+      }, 3000);
+      // 2 分钟超时
+      setTimeout(() => {
+        if (this._tgPollTimer) {
+          clearInterval(this._tgPollTimer);
+          this._tgPollTimer = null;
+          this.tgWaitingChatId = false;
+        }
+      }, 120000);
     },
     async refreshTgStatus() {
       try { this.tgStatus = await this.api('GET', '/api/telegram/status'); } catch (e) {}
@@ -1149,12 +1221,35 @@ function app() {
         if (r.ok) {
           this.fsForm.app_id = '';
           this.fsForm.app_secret = '';
-          this.fsStatus = { logged_in: true, message: r.message };
           this.toast('success', '飞书验证成功', r.message);
+          await this.refreshFsStatus();
+          if (!this.fsStatus.receive_id) {
+            this.fsWaitingOpenId = true;
+            this._startFsPoll();
+          }
         } else {
           this.toast('error', '验证失败', r.error);
         }
       } catch (e) { this.toast('error', '验证失败', e.message); }
+    },
+    _startFsPoll() {
+      if (this._fsPollTimer) clearInterval(this._fsPollTimer);
+      this._fsPollTimer = setInterval(async () => {
+        await this.refreshFsStatus();
+        if (this.fsStatus.receive_id) {
+          this.fsWaitingOpenId = false;
+          clearInterval(this._fsPollTimer);
+          this._fsPollTimer = null;
+          this.toast('success', 'Open ID 已获取', this.fsStatus.receive_id);
+        }
+      }, 3000);
+      setTimeout(() => {
+        if (this._fsPollTimer) {
+          clearInterval(this._fsPollTimer);
+          this._fsPollTimer = null;
+          this.fsWaitingOpenId = false;
+        }
+      }, 120000);
     },
     async refreshFsStatus() {
       try { this.fsStatus = await this.api('GET', '/api/feishu/status'); } catch (e) {}
@@ -1174,12 +1269,35 @@ function app() {
         if (r.ok) {
           this.dtForm.app_key = '';
           this.dtForm.app_secret = '';
-          this.dtStatus = { logged_in: true, message: r.message };
           this.toast('success', '钉钉验证成功', r.message);
+          await this.refreshDtStatus();
+          if (!this.dtStatus.user_id) {
+            this.dtWaitingUserId = true;
+            this._startDtPoll();
+          }
         } else {
           this.toast('error', '验证失败', r.error);
         }
       } catch (e) { this.toast('error', '验证失败', e.message); }
+    },
+    _startDtPoll() {
+      if (this._dtPollTimer) clearInterval(this._dtPollTimer);
+      this._dtPollTimer = setInterval(async () => {
+        await this.refreshDtStatus();
+        if (this.dtStatus.user_id) {
+          this.dtWaitingUserId = false;
+          clearInterval(this._dtPollTimer);
+          this._dtPollTimer = null;
+          this.toast('success', 'User ID 已获取', this.dtStatus.user_id);
+        }
+      }, 3000);
+      setTimeout(() => {
+        if (this._dtPollTimer) {
+          clearInterval(this._dtPollTimer);
+          this._dtPollTimer = null;
+          this.dtWaitingUserId = false;
+        }
+      }, 120000);
     },
     async refreshDtStatus() {
       try { this.dtStatus = await this.api('GET', '/api/dingtalk/status'); } catch (e) {}
