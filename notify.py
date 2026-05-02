@@ -630,8 +630,8 @@ def _is_auto_approved(ctx: dict) -> tuple[bool, str]:
     permission_mode = ctx.get("permission_mode", "") or _get_permission_mode()
 
     if permission_mode == "bypassPermissions":
-        # bypassPermissions 下仍有少量工具需要手动批准，PermissionRequest 事件不应跳过
-        if hook_event == "PermissionRequest":
+        # bypassPermissions 下 PermissionRequest/Stop/Elicitation 仍需通知用户
+        if hook_event in ("PermissionRequest", "Stop", "Elicitation"):
             return False, ""
         return True, f"bypassPermissions 模式，跳过 {tool_name}"
 
