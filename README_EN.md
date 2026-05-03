@@ -127,20 +127,27 @@ Reply `1` on QQ/WeChat to approve, and the terminal continues automatically.
 **Feishu:**
 1. Create an enterprise app at [Feishu Open Platform](https://open.feishu.cn/)
 2. Enable **Robot** capability
-3. Add permissions: `im:message`, `im:message.receive_v1`, `auth:user_access_token:read`
-4. Event subscription → Add `im.message.receive_v1`
-5. Publish the app (at least to your organization)
+3. **Permissions** → Search and enable:
+   - `im:message` — Send and receive messages
+   - `im:message.receive_v1` — Receive message events
+   - `auth:user_access_token:read` — User info
+4. **Event subscription** → Connection mode: **WebSocket** → Add event `im.message.receive_v1`
+5. Publish the app (at least to your organization), **permission changes require a new app version to take effect**
 6. Enter App ID / App Secret in the Web UI, validate and save
 7. Find the bot in Feishu and send a message, the system auto-captures Open ID
 
 **DingTalk:**
 1. Create an app at [DingTalk Open Platform](https://open.dingtalk.com/)
-2. Add **Robot** capability
-3. Select **Stream mode** in message receiving settings
+2. Add **Robot** capability, select **Stream mode** in message receiving settings
+3. **Permissions** → Search and enable:
+   - `qyapi_robot_sendmsg` — Send messages
+   - `Robot.SingleChat.ReadWrite` — Read/write single chat messages (**required, otherwise user replies won't be received**)
 4. Get Client ID and Client Secret (on the app credentials page)
 5. Publish the app
 6. Enter Client ID / Client Secret in the Web UI, validate and save
 7. Find the bot in DingTalk and send a message, the system auto-captures User ID
+
+> **Note:** DingTalk's message receiving capability is built into the "Robot" feature — no need to add events separately in "Event subscription". If messages aren't being received, check that `Robot.SingleChat.ReadWrite` permission is enabled first.
 
 ---
 
@@ -321,10 +328,17 @@ python notify.py --ui         # Launch Web UI
 
 ## FAQ
 
-**Q: No response in terminal after QQ/WeChat reply?**
+**Q: No response in terminal after QQ/WeChat/Feishu/DingTalk reply?**
 - Check if the keepalive daemon is running (look for `keepalive.pid` file)
 - Confirm `interaction.enabled` is `true`
-- Check `notify.log` for `交互响应` (interaction response) logs
+- Check `notify.log` for `收到消息` (message received) and `交互回复` (interaction reply) logs
+- If no `收到消息` log appears, the message didn't reach the keepalive process — check platform permissions
+
+**Q: DingTalk/Feishu not receiving user messages?**
+- **DingTalk**: Confirm `Robot.SingleChat.ReadWrite` permission is enabled (required for single chat)
+- **Feishu**: Confirm `im.message.receive_v1` event is subscribed, connection mode is WebSocket
+- Check `notify.log` for `收到消息` logs; absence means the connection isn't receiving events
+- Permission changes require publishing a new app version to take effect
 
 **Q: Notifications not appearing?**
 - Run `python notify.py --test` to test each channel
@@ -366,6 +380,25 @@ claude-code-notify-plus/
     ├── index.html            # Web UI (Tailwind + Alpine.js)
     └── vendor/               # Local JS libraries
 ```
+
+---
+
+## Changelog
+
+### 2026-05-03
+
+**Configuration Improvements:**
+- DingTalk setup instructions now include `Robot.SingleChat.ReadWrite` permission (required for receiving single chat messages)
+- Feishu setup instructions now include WebSocket connection mode and permission details
+- Web UI configuration steps updated in sync
+- Fixed `requirements.txt` `dingtalk-stream` version (`>=1.0.0` → `>=0.24.0`)
+
+**Connection Stability Improvements (`weixin_keepalive.py`):**
+- **Multi-instance protection**: Auto-detect and kill stale keepalive processes on startup to prevent connection conflicts
+- **Message deduplication**: New `MessageDedup` class (5-minute TTL) prevents duplicate message processing after SDK reconnects and replays old messages
+- **DingTalk heartbeat optimization**: Subclass `DingTalkStreamClient` to reduce ping interval from 60s (default) to 10s for faster disconnect detection
+- **Feishu reconnect optimization**: Watchdog timeout reduced from 5 minutes to 2 minutes, reconnect delay from 5s to 2s
+- **Enhanced logging**: Full message chain logging (connection established → message received → parsed → matched → response written), connection state changes marked with emoji indicators
 
 ---
 

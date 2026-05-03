@@ -609,9 +609,15 @@
         <ol class="text-xs text-gray-400 space-y-1 list-decimal list-inside">
           <li>在 <a href="https://open.feishu.cn/" target="_blank" class="text-indigo-400 hover:underline">飞书开放平台</a> 创建企业自建应用</li>
           <li>开启<b>机器人</b>能力</li>
-          <li>添加权限：<code class="bg-gray-700/50 px-1 rounded">im:message</code>、<code class="bg-gray-700/50 px-1 rounded">im:message.receive_v1</code>、<code class="bg-gray-700/50 px-1 rounded">auth:user_access_token:read</code></li>
-          <li>事件订阅 → 添加 <code class="bg-gray-700/50 px-1 rounded">im.message.receive_v1</code></li>
-          <li>发布应用（至少发布到企业内部）</li>
+          <li><b>权限管理</b> → 搜索并开启以下权限：
+            <ul class="ml-6 mt-1 space-y-0.5 list-disc">
+              <li><code class="bg-gray-700/50 px-1 rounded">im:message</code> — 获取与发送消息</li>
+              <li><code class="bg-gray-700/50 px-1 rounded">im:message.receive_v1</code> — 接收消息事件</li>
+              <li><code class="bg-gray-700/50 px-1 rounded">auth:user_access_token:read</code> — 用户信息</li>
+            </ul>
+          </li>
+          <li><b>事件订阅</b> → 连接方式选择 <b>WebSocket</b> → 添加事件 <code class="bg-gray-700/50 px-1 rounded">im.message.receive_v1</code></li>
+          <li>发布应用（至少发布到企业内部），权限变更后需重新发布版本才生效</li>
           <li>验证凭据后，在飞书中找到 Bot 发送一条消息，系统自动获取 Open ID</li>
         </ol>
       </div>
@@ -679,12 +685,18 @@
         <p class="text-xs text-gray-400 font-medium mb-2">配置步骤：</p>
         <ol class="text-xs text-gray-400 space-y-1 list-decimal list-inside">
           <li>在 <a href="https://open.dingtalk.com/" target="_blank" class="text-indigo-400 hover:underline">钉钉开放平台</a> 创建应用</li>
-          <li>添加<b>机器人</b>能力</li>
-          <li>在「消息接收模式」中选择 <b>Stream 模式</b></li>
+          <li>添加<b>机器人</b>能力，在「消息接收模式」中选择 <b>Stream 模式</b></li>
+          <li><b>权限管理</b> → 搜索并开启以下权限：
+            <ul class="ml-6 mt-1 space-y-0.5 list-disc">
+              <li><code class="bg-gray-700/50 px-1 rounded">qyapi_robot_sendmsg</code> — 发送消息</li>
+              <li><code class="bg-gray-700/50 px-1 rounded">Robot.SingleChat.ReadWrite</code> — 读写单聊消息（<b class="text-amber-400">必须开启，否则收不到用户回复</b>）</li>
+            </ul>
+          </li>
           <li>获取 Client ID 和 Client Secret（在应用凭证页面）</li>
           <li>发布应用</li>
           <li>验证凭据后，在钉钉中找到 Bot 发送一条消息，系统自动获取 User ID</li>
         </ol>
+        <p class="text-xs text-gray-500 mt-2">💡 机器人接收消息的能力内置于「机器人」能力中，无需在「事件订阅」中单独添加事件。</p>
       </div>
 
       <div class="mb-6 p-4 rounded-lg" :class="dtStatus.logged_in ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-gray-700/30 border border-gray-600/30'">

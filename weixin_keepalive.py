@@ -41,6 +41,35 @@ KEEPALIVE_POLL_TIMEOUT = 35
 MAX_CONSECUTIVE_FAILURES = 3
 
 
+# ── 消息去重 ──────────────────────────────────────────────
+
+class MessageDedup:
+    """基于 TTL 的消息去重缓存，防止重连后重复处理消息"""
+
+    def __init__(self, ttl_seconds: int = 300):
+        self._cache: dict[str, float] = {}
+        self._ttl = ttl_seconds
+
+    def is_duplicate(self, message_id: str) -> bool:
+        if not message_id:
+            return False
+        self._cleanup()
+        if message_id in self._cache:
+            return True
+        self._cache[message_id] = time.time()
+        return False
+
+    def _cleanup(self):
+        now = time.time()
+        expired = [k for k, v in self._cache.items() if now - v > self._ttl]
+        for k in expired:
+            del self._cache[k]
+
+
+_dingtalk_dedup = MessageDedup()
+_feishu_dedup = MessageDedup()
+
+
 def log(msg: str):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
@@ -131,14 +160,19 @@ def _process_incoming_message(text: str, channel: str):
     处理收到的消息，匹配 pending 请求并写入 response。
     """
     if not PENDING_DIR.exists():
+        log(f"[{channel}] ⚠️ pending 目录不存在，跳过")
         return
     pending_files = list(PENDING_DIR.glob("*.json"))
     if not pending_files:
+        log(f"[{channel}] ⚠️ 无 pending 请求，跳过: {text[:30]}")
         return
 
     label, reply = _extract_reply_parts(text)
     if not reply or not label:
+        log(f"[{channel}] ⚠️ 无法解析标签/选项: '{text[:30]}'")
         return
+
+    log(f"[{channel}] 🔍 解析: label={label}, reply={reply}")
 
     # 找到目标 pending 请求（必须匹配标签）
     target_pending = None
@@ -152,14 +186,16 @@ def _process_incoming_message(text: str, channel: str):
             continue
 
     if not target_pending:
-        log(f"[{channel}] 未找到标签 #{label} 对应的请求，跳过: {text[:30]}")
+        log(f"[{channel}] ❌ 未找到标签 #{label} 对应的请求，跳过: {text[:30]}")
         return
 
     request_id = target_pending["id"]
+    log(f"[{channel}] 🎯 匹配请求: {request_id}")
 
     # 原子写入 response
     resp_file = RESPONSE_DIR / f"{request_id}.json"
     if resp_file.exists():
+        log(f"[{channel}] ⏭️ response 已存在，跳过: {request_id}")
         return
 
     import tempfile
@@ -176,14 +212,14 @@ def _process_incoming_message(text: str, channel: str):
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
             json.dump(response, f, ensure_ascii=False)
         os.rename(tmp_path, str(resp_file))
-        log(f"[{channel}] 交互回复: {text[:50]} → {request_id}")
+        log(f"[{channel}] ✅ 交互回复已写入: {text[:50]} → {request_id}")
     except FileExistsError:
         try:
             os.unlink(tmp_path)
         except Exception:
             pass
     except Exception as e:
-        log(f"[{channel}] 写入 response 失败: {e}")
+        log(f"[{channel}] ❌ 写入 response 失败: {e}")
         try:
             os.unlink(tmp_path)
         except Exception:
@@ -518,9 +554,9 @@ def feishu_websocket_loop():
         log("[feishu] lark-oapi 未安装，跳过飞书监听")
         return
 
-    # 看门狗：记录最近一次收到消息的时间，超时则强制重连
+    WATCHDOG_TIMEOUT = 120  # 2 分钟无消息则检查连接（原 5 分钟太长）
     last_message_time = time.time()
-    WATCHDOG_TIMEOUT = 300  # 5 分钟无消息则重连
+    connection_established = False
 
     while True:
         cfg = load_config()
@@ -532,16 +568,26 @@ def feishu_websocket_loop():
             log("[feishu] 飞书配置不完整，监听退出")
             break
 
-        last_message_time = time.time()  # 重置看门狗
+        last_message_time = time.time()
+        connection_established = False
 
         try:
             def on_message(data):
-                nonlocal last_message_time
+                nonlocal last_message_time, connection_established
                 last_message_time = time.time()
+                if not connection_established:
+                    connection_established = True
+                    log("[feishu] ✅ 连接已建立，开始接收消息")
                 try:
                     msg = data.event.message
                     sender = data.event.sender
                     open_id = sender.sender_id.open_id if sender and sender.sender_id else ""
+
+                    # 消息去重
+                    msg_id = msg.message_id if msg else ""
+                    if _feishu_dedup.is_duplicate(msg_id):
+                        return
+
                     content = ""
                     if msg.content:
                         try:
@@ -549,7 +595,7 @@ def feishu_websocket_loop():
                         except json.JSONDecodeError:
                             pass
 
-                    log(f"[feishu] 收到消息 from {open_id}: {content[:50]}")
+                    log(f"[feishu] 📩 收到消息 from {open_id}: {content[:50]}")
 
                     if open_id:
                         cfg = load_config()
@@ -559,9 +605,12 @@ def feishu_websocket_loop():
                             log(f"[feishu] 获取到 open_id: {open_id}")
 
                     if content and PENDING_DIR.exists() and any(PENDING_DIR.glob("*.json")):
+                        log(f"[feishu] 🔍 解析内容: {content[:50]}")
                         _process_incoming_message(content, "feishu")
+                    elif content:
+                        log(f"[feishu] 📭 无 pending 请求，忽略消息")
                 except Exception as e:
-                    log(f"[feishu] 处理消息异常: {e}")
+                    log(f"[feishu] ❌ 处理消息异常: {e}")
 
             event_handler = lark.EventDispatcherHandler.builder("", "").register_p2_im_message_receive_v1(on_message).build()
 
@@ -571,15 +620,17 @@ def feishu_websocket_loop():
                 event_handler=event_handler,
                 log_level=lark.LogLevel.WARNING,
             )
-            log("[feishu] WebSocket 连接中...")
+            log("[feishu] 🔄 WebSocket 连接中...")
 
-            # 看门狗：在守护线程中监控消息活跃度
+            # 看门狗：检测连接状态
             def _feishu_watchdog():
                 while True:
-                    time.sleep(60)
+                    time.sleep(30)
+                    if not connection_established:
+                        continue
                     elapsed = time.time() - last_message_time
                     if elapsed > WATCHDOG_TIMEOUT:
-                        log(f"[feishu] WebSocket 超过 {WATCHDOG_TIMEOUT}s 无消息，强制重连")
+                        log(f"[feishu] ⚠️ 超过 {WATCHDOG_TIMEOUT}s 无消息，强制重连")
                         try:
                             ws_client._Client__ws_client and ws_client._Client__ws_client.close()
                         except Exception:
@@ -592,9 +643,10 @@ def feishu_websocket_loop():
             ws_client.start()
 
         except Exception as e:
-            log(f"[feishu] WebSocket 异常: {e}")
+            log(f"[feishu] ❌ WebSocket 异常: {e}")
 
-        time.sleep(5)
+        log("[feishu] 🔄 连接断开，2 秒后重连...")
+        time.sleep(2)
 
 
 def feishu_thread_entry():
@@ -611,13 +663,25 @@ def dingtalk_stream_loop():
     """钉钉 Stream 长连接监听，自动获取 user_id"""
     try:
         import dingtalk_stream
-        from dingtalk_stream import DingTalkStreamClient, ChatbotHandler, Credential
+        from dingtalk_stream import ChatbotHandler, Credential
     except ImportError:
         log("[dingtalk] dingtalk-stream 未安装，跳过钉钉监听")
         return
 
+    # 子类化 DingTalkStreamClient，缩短心跳间隔到 10 秒（默认 60 秒）
+    class FastHeartbeatClient(dingtalk_stream.DingTalkStreamClient):
+        async def keepalive(self, ws, ping_interval=10):
+            """10 秒心跳间隔，更快检测连接断开"""
+            while True:
+                await asyncio.sleep(ping_interval)
+                try:
+                    await ws.ping()
+                except Exception:
+                    break
+
+    WATCHDOG_TIMEOUT = 120  # 2 分钟无消息则检查连接状态（原 5 分钟太长）
     last_message_time = time.time()
-    WATCHDOG_TIMEOUT = 300  # 5 分钟无消息则重连
+    connection_established = False
 
     while True:
         cfg = load_config()
@@ -630,17 +694,26 @@ def dingtalk_stream_loop():
             break
 
         last_message_time = time.time()
+        connection_established = False
 
         try:
             credential = Credential(client_id, client_secret)
-            client = DingTalkStreamClient(credential)
+            client = FastHeartbeatClient(credential)
 
             class BotHandler(ChatbotHandler):
                 def process(self, callback_message):
-                    nonlocal last_message_time
+                    nonlocal last_message_time, connection_established
                     last_message_time = time.time()
+                    if not connection_established:
+                        connection_established = True
+                        log("[dingtalk] ✅ 连接已建立，开始接收消息")
                     try:
                         message = dingtalk_stream.ChatbotMessage.from_dict(callback_message.data)
+
+                        # 消息去重
+                        msg_id = message.message_id or ""
+                        if _dingtalk_dedup.is_duplicate(msg_id):
+                            return
 
                         content = ""
                         if message.text and hasattr(message.text, 'content'):
@@ -653,7 +726,7 @@ def dingtalk_stream_loop():
                                 content = " ".join(text_list).strip()
 
                         sender_id = message.sender_staff_id or message.sender_id or ""
-                        log(f"[dingtalk] 收到消息 from {sender_id}: {content[:50]}")
+                        log(f"[dingtalk] 📩 收到消息 from {sender_id}: {content[:50]}")
 
                         if sender_id:
                             cfg = load_config()
@@ -663,35 +736,44 @@ def dingtalk_stream_loop():
                                 log(f"[dingtalk] 获取到 user_id: {sender_id}")
 
                         if content and PENDING_DIR.exists() and any(PENDING_DIR.glob("*.json")):
+                            log(f"[dingtalk] 🔍 解析内容: {content[:50]}")
                             _process_incoming_message(content, "dingtalk")
+                        elif content:
+                            log(f"[dingtalk] 📭 无 pending 请求，忽略消息")
                     except Exception as e:
-                        log(f"[dingtalk] 处理消息异常: {e}")
+                        log(f"[dingtalk] ❌ 处理消息异常: {e}")
 
             client.register_callback_handler(dingtalk_stream.ChatbotMessage.TOPIC, BotHandler())
-            log("[dingtalk] Stream 连接中...")
+            log("[dingtalk] 🔄 Stream 连接中...")
 
-            # 看门狗：在守护线程中监控消息活跃度
+            # 看门狗：检测连接状态
             def _dingtalk_watchdog():
                 while True:
-                    time.sleep(60)
+                    time.sleep(30)
+                    if not connection_established:
+                        continue
                     elapsed = time.time() - last_message_time
                     if elapsed > WATCHDOG_TIMEOUT:
-                        log(f"[dingtalk] Stream 超过 {WATCHDOG_TIMEOUT}s 无消息，强制重连")
+                        log(f"[dingtalk] ⚠️ 超过 {WATCHDOG_TIMEOUT}s 无消息，检查连接...")
+                        # 检查 websocket 状态
                         try:
-                            client.close()
+                            if client.websocket and client.websocket.closed:
+                                log("[dingtalk] ❌ WebSocket 已关闭，触发重连")
+                                break
                         except Exception:
                             pass
-                        break
 
             threading.Thread(target=_dingtalk_watchdog, daemon=True).start()
 
             # 主线程阻塞调用 start_forever()
+            # SDK 内置重连：断开后 sleep(3) 再重连
             client.start_forever()
 
         except Exception as e:
-            log(f"[dingtalk] Stream 异常: {e}")
+            log(f"[dingtalk] ❌ Stream 异常: {e}")
 
-        time.sleep(5)
+        log("[dingtalk] 🔄 连接断开，3 秒后重连...")
+        time.sleep(3)
 
 
 def dingtalk_thread_entry():
@@ -710,10 +792,34 @@ def cleanup(signum=None, frame=None):
     sys.exit(0)
 
 
+def _kill_old_process():
+    """终止旧的 keepalive 进程"""
+    if not PID_FILE.exists():
+        return
+    try:
+        old_pid = int(PID_FILE.read_text(encoding="utf-8").strip())
+        if old_pid == os.getpid():
+            return
+        log(f"[keepalive] 检测到旧进程 PID={old_pid}，尝试终止...")
+        if sys.platform == "win32":
+            import subprocess
+            subprocess.run(["taskkill", "/F", "/PID", str(old_pid)],
+                           capture_output=True, timeout=5)
+        else:
+            os.kill(old_pid, signal.SIGTERM)
+        time.sleep(1)
+    except (ValueError, OSError, ProcessLookupError, Exception):
+        pass
+    try:
+        PID_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def main():
     if is_already_running():
-        print("keepalive 已在运行中")
-        return
+        _kill_old_process()
+        time.sleep(1)
 
     write_pid()
     log(f"keepalive 守护进程启动 (PID={os.getpid()})")

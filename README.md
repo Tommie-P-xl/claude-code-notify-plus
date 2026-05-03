@@ -147,20 +147,27 @@ hook 触发 → 解析上下文 → 提取选项 → 创建 pending 文件
 **飞书：**
 1. 在 [飞书开放平台](https://open.feishu.cn/) 创建企业自建应用
 2. 开启**机器人**能力
-3. 添加权限：`im:message`、`im:message.receive_v1`、`auth:user_access_token:read`
-4. 事件订阅 → 添加 `im.message.receive_v1`
-5. 发布应用（至少发布到企业内部）
+3. **权限管理** → 搜索并开启以下权限：
+   - `im:message` — 获取与发送消息
+   - `im:message.receive_v1` — 接收消息事件
+   - `auth:user_access_token:read` — 用户信息
+4. **事件订阅** → 连接方式选择 **WebSocket** → 添加事件 `im.message.receive_v1`
+5. 发布应用（至少发布到企业内部），**权限变更后需重新发布版本才生效**
 6. 在 Web UI 填入 App ID / App Secret，验证并保存
 7. 在飞书中找到 Bot 发送一条消息，系统自动获取 Open ID
 
 **钉钉：**
 1. 在 [钉钉开放平台](https://open.dingtalk.com/) 创建应用
-2. 添加**机器人**能力
-3. 在「消息接收模式」中选择 **Stream 模式**
+2. 添加**机器人**能力，在「消息接收模式」中选择 **Stream 模式**
+3. **权限管理** → 搜索并开启以下权限：
+   - `qyapi_robot_sendmsg` — 发送消息
+   - `Robot.SingleChat.ReadWrite` — 读写单聊消息（**必须开启，否则收不到用户回复**）
 4. 获取 Client ID 和 Client Secret（在应用凭证页面）
 5. 发布应用
 6. 在 Web UI 填入 Client ID / Client Secret，验证并保存
 7. 在钉钉中找到 Bot 发送一条消息，系统自动获取 User ID
+
+> **注意：** 钉钉机器人接收消息的能力内置于「机器人」能力中，无需在「事件订阅」中单独添加事件。如果收不到消息，请优先检查 `Robot.SingleChat.ReadWrite` 权限是否已开启。
 
 ---
 
@@ -341,10 +348,17 @@ python notify.py --ui         # 启动 Web 界面
 
 ## 常见问题
 
-**Q: QQ/微信回复后终端没反应？**
+**Q: QQ/微信/飞书/钉钉回复后终端没反应？**
 - 检查 keepalive 守护进程是否在运行（`keepalive.pid` 文件）
 - 确认 `interaction.enabled` 为 `true`
-- 查看 `notify.log` 中是否有 `交互响应` 日志
+- 查看 `notify.log` 中是否有 `收到消息` 和 `交互回复` 日志
+- 如果日志中没有 `收到消息`，说明消息未到达 keepalive 进程，检查平台权限配置
+
+**Q: 钉钉/飞书收不到用户消息？**
+- **钉钉**：确认已开启 `Robot.SingleChat.ReadWrite` 权限（单聊必须）
+- **飞书**：确认事件订阅中已添加 `im.message.receive_v1`，且连接方式选择 WebSocket
+- 查看 `notify.log` 中是否有 `收到消息` 日志，如果没有说明连接未收到事件推送
+- 权限变更后需重新发布应用版本才生效
 
 **Q: 通知没有弹出？**
 - 运行 `python notify.py --test` 测试各渠道
@@ -386,6 +400,25 @@ claude-code-notify-plus/
 │   └── index.html            # Web UI（Tailwind + Alpine.js）
 └── new/                      # 设计文档和实现计划
 ```
+
+---
+
+## 更新日志
+
+### 2026-05-03
+
+**配置改进：**
+- 钉钉配置说明增加 `Robot.SingleChat.ReadWrite` 权限（单聊接收消息必须）
+- 飞书配置说明增加 WebSocket 连接模式和权限细节
+- Web UI 配置步骤同步更新
+- 修正 `requirements.txt` 中 `dingtalk-stream` 版本号（`>=1.0.0` → `>=0.24.0`）
+
+**连接稳定性改进（`weixin_keepalive.py`）：**
+- **多实例保护**：启动时自动检测并终止旧的 keepalive 进程，避免多实例争抢连接
+- **消息去重**：新增 `MessageDedup` 类（5 分钟 TTL），防止重连后 SDK 重放旧消息导致重复处理
+- **钉钉心跳优化**：子类化 `DingTalkStreamClient`，心跳间隔从默认 60 秒缩短到 10 秒，更快检测连接断开
+- **飞书重连优化**：看门狗超时从 5 分钟缩短到 2 分钟，重连延迟从 5 秒降到 2 秒
+- **日志增强**：全链路日志（连接建立 → 收到消息 → 解析 → 匹配 → 写入 response），连接状态变化有 emoji 标记
 
 ---
 
