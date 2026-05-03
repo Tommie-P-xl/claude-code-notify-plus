@@ -508,8 +508,11 @@ def main():
         show_terminal = config.get("interaction", {}).get("show_in_terminal", True)
         response = interaction.wait_for_response(pending["id"], timeout, show_terminal)
 
-        # 清理
-        interaction.cleanup_request(pending["id"])
+        # 清理：只删 pending 文件，保留 response 文件供其他渠道检测"已处理"
+        try:
+            (interaction.PENDING_DIR / f"{pending['id']}.json").unlink(missing_ok=True)
+        except Exception:
+            pass
 
         # 输出响应给 Claude Code
         if response:
@@ -529,8 +532,27 @@ def main():
                         ok = ch.send("Claude Code - 回复确认", feedback_msg)
                         log(f"[{ch.name}] 发送反馈: {feedback_msg} ({'成功' if ok else '失败'})")
                         break
+
+            # 向其他远程渠道主动推送"已处理"通知
+            _REMOTE_CHANNEL_NAMES = {"weixin", "qq", "telegram", "feishu", "dingtalk"}
+            label = pending.get("label", "?")
+            context_brief = pending.get("context_text", "")[:40]
+            # resp_channel 为空时说明是终端回复
+            handled_by = resp_channel if resp_channel else "终端"
+            done_msg = (
+                f"#{label} 已由【{handled_by}】处理，无需再次回复\n"
+                f"内容: {context_brief}"
+            )
+            for ch in channels:
+                if (ch.is_enabled()
+                        and ch.name in _REMOTE_CHANNEL_NAMES
+                        and ch.name != resp_channel):
+                    ok = ch.send("Claude Code - 已处理", done_msg)
+                    log(f"[{ch.name}] 已处理通知: {'成功' if ok else '失败'}")
         else:
             log("等待用户响应超时")
+            # 超时：清理 pending 和 response 文件
+            interaction.cleanup_request(pending["id"])
 
     else:
         # ── 现有行为（完全不变）──

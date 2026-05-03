@@ -15,6 +15,8 @@ When Claude Code needs your input — whether it's approving file writes, choosi
 - **Remote selection** — Answer Claude Code's single-choice and multiple-choice questions remotely, with multi-question support
 - **Smart notifications** — Auto-filters authorized operations, only notifies for decisions that need your attention
 - **Reply feedback** — Receive confirmation on the same channel after replying via QQ/WeChat
+- **Unique labels** — Labels increase monotonically within a session (A→B→C→...→Z→AA), no duplicates
+- **Cross-channel awareness** — After approval on one channel, others proactively receive "already handled" notifications; late replies also get feedback
 - **Zero intrusion** — Doesn't modify Claude Code itself, integrates seamlessly via hooks
 
 ---
@@ -204,9 +206,10 @@ A yes        → Keyword matching: 是/yes/ok/approve → approve
 ### Competition Mechanism
 
 All channels listen simultaneously, first reply wins. After a reply:
-- Other channels automatically cancel their wait
 - The replying channel receives confirmation feedback (e.g., QQ reply → QQ gets "Reply received")
-- Terminal input doesn't trigger feedback
+- Other remote channels proactively receive "already handled" notification (e.g., terminal approves → QQ/Telegram gets "#A handled by terminal, no need to reply")
+- If you reply after another channel already handled it, you'll get "#A handled by [xx], your reply has been ignored"
+- Terminal input doesn't trigger terminal feedback, but other channels still receive the handled notification
 
 ### Multi-Request Handling
 
@@ -349,6 +352,7 @@ python notify.py --ui         # Launch Web UI
 
 **Q: What if labels run out?**
 - After the Claude Code session closes, leftover requests are automatically cleaned up and labels restart from A. Requests within the session can be replied to at any time
+- Labels increase monotonically within a session (A→B→C→...→Z→AA→AB), so no label is reused even after a request is cleared
 
 **Q: Flask doesn't exit after closing browser?**
 - Auto-exits about 2 seconds after SSE connection disconnects
@@ -384,6 +388,22 @@ claude-code-notify-plus/
 ---
 
 ## Changelog
+
+### 2026-05-03 (Interaction Experience Improvements)
+
+**Unique Labels (`interaction.py`):**
+- Introduced persistent monotonic counter (`pending/.label_seq`), labels only increase within a session (A→B→C→...→Z→AA→AB)
+- Fixes label duplication confusion in multi-agent scenarios
+- Counter resets on `cleanup_all()`, next session starts from A
+
+**Late-Reply Feedback (`weixin_keepalive.py`):**
+- New `_send_feedback_to_channel()` helper to send feedback to any channel
+- Rewrote `_process_incoming_message()`: properly formatted commands get clear feedback when no pending requests exist, label not found, or already handled by another channel
+- Plain chat messages (no label prefix) are still silently ignored
+
+**Cross-Channel Handled Notification (`notify.py`):**
+- After approval on one channel, proactively push "#X handled by [channel], no need to reply" to other remote channels
+- Combined with late-reply feedback, achieves full-chain status awareness
 
 ### 2026-05-03
 

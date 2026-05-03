@@ -155,24 +155,86 @@ def _extract_reply_parts(text: str) -> tuple:
     return ("", text)
 
 
+def _send_feedback_to_channel(channel: str, title: str, message: str):
+    """向指定渠道发送反馈消息（用于晚到回复或请求已处理的提示）"""
+    try:
+        cfg = load_config()
+        ch = None
+        if channel == "qq":
+            from channels.qq import QQBotChannel
+            ch = QQBotChannel(cfg)
+        elif channel == "telegram":
+            from channels.telegram import TelegramChannel
+            ch = TelegramChannel(cfg)
+        elif channel == "feishu":
+            from channels.feishu import FeishuChannel
+            ch = FeishuChannel(cfg)
+        elif channel == "dingtalk":
+            from channels.dingtalk import DingTalkChannel
+            ch = DingTalkChannel(cfg)
+        elif channel == "weixin":
+            from channels.weixin import WeixinChannel
+            ch = WeixinChannel(cfg)
+        if ch:
+            ch.send(title, message)
+            log(f"[{channel}] 反馈已发送: {title}")
+    except Exception as e:
+        log(f"[{channel}] 发送反馈失败: {e}")
+
+
+def _check_response_for_label(label: str) -> str:
+    """
+    扫描 response 文件，查找包含指定 label 的已处理记录。
+    返回通知文本（如 "#A 已由【terminal】处理（回复: 1），您的回复已忽略"），
+    未找到返回空字符串。
+    """
+    if not RESPONSE_DIR.exists():
+        return ""
+    for rf in RESPONSE_DIR.glob("*.json"):
+        try:
+            resp = json.loads(rf.read_text(encoding="utf-8"))
+            if resp.get("label", "").upper() == label.upper():
+                other_channel = resp.get("channel", "其他渠道")
+                other_reply = resp.get("reply", "")
+                return f"#{label} 已由【{other_channel}】处理（回复: {other_reply}），您的回复已忽略"
+        except Exception:
+            continue
+    return ""
+
+
 def _process_incoming_message(text: str, channel: str):
     """
     处理收到的消息，匹配 pending 请求并写入 response。
+    已处理/找不到请求时向用户发送反馈。
     """
-    if not PENDING_DIR.exists():
-        log(f"[{channel}] ⚠️ pending 目录不存在，跳过")
-        return
-    pending_files = list(PENDING_DIR.glob("*.json"))
-    if not pending_files:
-        log(f"[{channel}] ⚠️ 无 pending 请求，跳过: {text[:30]}")
-        return
-
+    # 先解析标签，只有格式正确的命令才继续处理
+    # （防止普通聊天消息触发"无请求"反馈）
     label, reply = _extract_reply_parts(text)
     if not reply or not label:
-        log(f"[{channel}] ⚠️ 无法解析标签/选项: '{text[:30]}'")
+        log(f"[{channel}] ⚠️ 非命令格式，跳过: '{text[:30]}'")
         return
 
+    log(f"[{channel}] 📩 收到消息: {text[:50]}")
     log(f"[{channel}] 🔍 解析: label={label}, reply={reply}")
+
+    if not PENDING_DIR.exists():
+        log(f"[{channel}] ⚠️ pending 目录不存在")
+        _send_feedback_to_channel(channel, "Claude Code - 提示",
+                                  f"当前无等待回复的请求（#{label} 可能已被其他渠道处理）")
+        return
+
+    pending_files = list(PENDING_DIR.glob("*.json"))
+    if not pending_files:
+        # pending 为空，检查 response 文件中是否有已处理的记录
+        handled = _check_response_for_label(label)
+        if handled:
+            log(f"[{channel}] ⏭️ {handled}")
+            _send_feedback_to_channel(channel, "Claude Code - 已处理", handled)
+        else:
+            log(f"[{channel}] ⚠️ 无 pending 请求: {text[:30]}")
+            _send_feedback_to_channel(channel, "Claude Code - 提示",
+                                      f"当前无等待回复的请求（#{label} 可能已被其他渠道处理）")
+        return
 
     # 找到目标 pending 请求（必须匹配标签）
     target_pending = None
@@ -186,38 +248,60 @@ def _process_incoming_message(text: str, channel: str):
             continue
 
     if not target_pending:
-        log(f"[{channel}] ❌ 未找到标签 #{label} 对应的请求，跳过: {text[:30]}")
+        # pending 文件未找到，回退检查 response 文件中是否有匹配的 label
+        handled = _check_response_for_label(label)
+        if handled:
+            log(f"[{channel}] ⏭️ {handled}")
+            _send_feedback_to_channel(channel, "Claude Code - 已处理", handled)
+        else:
+            log(f"[{channel}] ❌ 未找到标签 #{label} 对应的请求")
+            _send_feedback_to_channel(channel, "Claude Code - 提示",
+                                      f"未找到 #{label} 对应的请求（可能已被其他渠道处理）")
         return
 
     request_id = target_pending["id"]
     log(f"[{channel}] 🎯 匹配请求: {request_id}")
 
-    # 原子写入 response
+    # 检查是否已被其他渠道抢先处理（response 文件已存在）
     resp_file = RESPONSE_DIR / f"{request_id}.json"
     if resp_file.exists():
-        log(f"[{channel}] ⏭️ response 已存在，跳过: {request_id}")
+        try:
+            existing = json.loads(resp_file.read_text(encoding="utf-8"))
+            other_channel = existing.get("channel", "其他渠道")
+            other_reply = existing.get("reply", "")
+            notice = f"#{label} 已由【{other_channel}】处理（回复: {other_reply}），您的回复已忽略"
+        except Exception:
+            notice = f"#{label} 已由其他渠道处理，您的回复已忽略"
+        log(f"[{channel}] ⏭️ {notice}")
+        _send_feedback_to_channel(channel, "Claude Code - 已处理", notice)
         return
 
-    import tempfile
+    # 原子写入 response
+    RESPONSE_DIR.mkdir(exist_ok=True)
     response = {
         "request_id": request_id,
         "reply": reply,
         "channel": channel,
         "received_at": time.time(),
+        "label": label,
     }
 
+    import tempfile
     try:
-        RESPONSE_DIR.mkdir(exist_ok=True)
         tmp_fd, tmp_path = tempfile.mkstemp(dir=str(RESPONSE_DIR), suffix=".tmp")
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
             json.dump(response, f, ensure_ascii=False)
         os.rename(tmp_path, str(resp_file))
         log(f"[{channel}] ✅ 交互回复已写入: {text[:50]} → {request_id}")
     except FileExistsError:
+        # 极小概率的竞争：在我们检查之后、写入之前被其他渠道写入
         try:
             os.unlink(tmp_path)
         except Exception:
             pass
+        log(f"[{channel}] ⏭️ response 被并发写入，跳过")
+        _send_feedback_to_channel(channel, "Claude Code - 已处理",
+                                  f"#{label} 已被其他渠道处理，您的回复已忽略")
     except Exception as e:
         log(f"[{channel}] ❌ 写入 response 失败: {e}")
         try:

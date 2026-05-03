@@ -17,6 +17,7 @@ from typing import Optional
 SCRIPT_DIR = Path(__file__).resolve().parent
 PENDING_DIR = SCRIPT_DIR / "pending"
 RESPONSE_DIR = SCRIPT_DIR / "responses"
+_LABEL_SEQ_FILE = PENDING_DIR / ".label_seq"
 
 # ── 纯工具函数 ──────────────────────────────────────────
 
@@ -31,10 +32,27 @@ def _generate_id() -> str:
 
 
 def _get_next_label() -> str:
-    """获取下一个字母标签（A, B, C...），基于当前 pending 文件数量"""
+    """获取下一个字母标签（A, B, C...），会话内单调递增，不因请求清理而重复"""
     _ensure_dirs()
-    existing = list(PENDING_DIR.glob("*.json"))
-    count = len(existing)
+    # 如果没有 pending 文件，说明是新会话，重置计数器
+    existing_pending = list(PENDING_DIR.glob("*.json"))
+    if not existing_pending:
+        try:
+            _LABEL_SEQ_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+    try:
+        count = int(_LABEL_SEQ_FILE.read_text(encoding="utf-8").strip())
+    except Exception:
+        count = 0
+    # 原子写入，保证计数完整性
+    try:
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(PENDING_DIR), suffix=".tmp")
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write(str(count + 1))
+        os.replace(tmp_path, str(_LABEL_SEQ_FILE))
+    except Exception:
+        pass
     if count < 26:
         return chr(ord("A") + count)
     first = chr(ord("A") + (count // 26 - 1) % 26)
@@ -296,6 +314,11 @@ def cleanup_all():
             f.unlink()
         except Exception:
             pass
+    # 会话结束时重置标签序号，下次从 A 开始
+    try:
+        _LABEL_SEQ_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def _is_process_running(pid: int) -> bool:
@@ -336,7 +359,7 @@ def cleanup_stale():
 
 # ── 响应处理 ────────────────────────────────────────────
 
-def write_response(request_id: str, reply: str, channel: str) -> bool:
+def write_response(request_id: str, reply: str, channel: str, label: str = "") -> bool:
     """
     原子写入 response 文件。
     如果文件已存在（被其他渠道抢先），返回 False。
@@ -352,6 +375,8 @@ def write_response(request_id: str, reply: str, channel: str) -> bool:
         "channel": channel,
         "received_at": time.time(),
     }
+    if label:
+        response["label"] = label
 
     tmp_fd, tmp_path = tempfile.mkstemp(dir=str(RESPONSE_DIR), suffix=".tmp")
     try:
@@ -652,7 +677,13 @@ def _console_reader_thread(request_id: str, response_file: Path):
         if response_file.exists():
             return
 
-        write_response(request_id, user_input, "terminal")
+        # 查找当前请求的 label，写入 response 供其他渠道检测
+        label = ""
+        for req in pending_list:
+            if req.get("id") == request_id:
+                label = req.get("label", "")
+                break
+        write_response(request_id, user_input, "terminal", label=label)
 
     except Exception:
         pass
