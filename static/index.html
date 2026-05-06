@@ -1,0 +1,1439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code 通知管理器</title>
+<script src="/static/vendor/tailwindcss.js"></script>
+<script src="/static/vendor/qrcode.min.js"></script>
+<script defer src="/static/vendor/alpine.min.js"></script>
+<style>
+  [x-cloak] { display: none !important; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+  .toast-in { animation: fadeIn 0.3s ease-out; }
+  @keyframes pulse-ring { 0% { transform: scale(0.8); opacity: 1; } 100% { transform: scale(2.2); opacity: 0; } }
+  .pulse-dot::before { content: ''; position: absolute; inset: 0; border-radius: 50%; background: inherit; animation: pulse-ring 1.5s infinite; }
+  .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.06); }
+  body { background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%); min-height: 100vh; }
+  .card { background: rgba(30,41,59,0.7); backdrop-filter: blur(8px); border: 1px solid rgba(99,102,241,0.15); transition: all 0.3s; }
+  .card:hover { border-color: rgba(99,102,241,0.35); box-shadow: 0 0 20px rgba(99,102,241,0.1); }
+  .btn-primary { background: linear-gradient(135deg, #6366f1, #8b5cf6); transition: all 0.2s; }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(99,102,241,0.4); }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-danger { background: linear-gradient(135deg, #ef4444, #dc2626); }
+  .btn-danger:hover { box-shadow: 0 4px 12px rgba(239,68,68,0.4); }
+  .toggle-track { transition: background 0.3s; }
+  .toggle-thumb { transition: transform 0.3s; }
+  .tab-active { border-bottom: 2px solid #818cf8; color: #a5b4fc; }
+  .tab-inactive { border-bottom: 2px solid transparent; color: #94a3b8; }
+  .tab-inactive:hover { color: #cbd5e1; }
+  .log-line { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 12px; }
+</style>
+</head>
+<body class="text-gray-200" x-data="app()" x-init="init()">
+
+<!-- Toast Container -->
+<div class="fixed top-4 right-4 z-50 flex flex-col gap-2" style="min-width:320px">
+  <template x-for="t in toasts" :key="t.id">
+    <div class="toast-in rounded-lg px-4 py-3 shadow-xl flex items-start gap-3"
+         :class="t.type==='success' ? 'bg-emerald-600/90' : t.type==='error' ? 'bg-red-600/90' : 'bg-indigo-600/90'">
+      <span class="mt-0.5" x-text="t.type==='success' ? '&#10003;' : t.type==='error' ? '&#10007;' : '&#9432;'"></span>
+      <div class="flex-1">
+        <div class="font-semibold text-sm" x-text="t.title"></div>
+        <div class="text-xs opacity-90 mt-0.5" x-text="t.message"></div>
+      </div>
+      <button @click="removeToast(t.id)" class="opacity-60 hover:opacity-100">&times;</button>
+    </div>
+  </template>
+</div>
+
+<!-- Header -->
+<header class="glass sticky top-0 z-40">
+  <div class="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-lg bg-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold text-lg">N</div>
+      <div>
+        <h1 class="text-lg font-bold text-white">Claude Code 通知管理器</h1>
+        <p class="text-xs text-gray-400">v2.1 &middot; 多渠道通知 &middot; Web 管理</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 text-xs">
+      <span class="flex items-center gap-1.5 px-2.5 py-1 rounded-full"
+            :class="status.hooks_installed ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'">
+        <span class="w-1.5 h-1.5 rounded-full" :class="status.hooks_installed ? 'bg-emerald-400' : 'bg-amber-400'"></span>
+        Hooks <span x-text="status.hooks_installed ? '已安装' : '未安装'"></span>
+      </span>
+    </div>
+  </div>
+</header>
+
+<!-- Tabs -->
+<nav class="max-w-5xl mx-auto px-6 mt-1">
+  <div class="flex gap-6">
+    <template x-for="tab in tabs" :key="tab.id">
+      <button @click="currentTab = tab.id"
+              class="py-3 text-sm font-medium transition-colors"
+              :class="currentTab === tab.id ? 'tab-active' : 'tab-inactive'"
+              x-text="tab.label"></button>
+    </template>
+  </div>
+</nav>
+
+<!-- Content -->
+<main class="max-w-5xl mx-auto px-6 py-6">
+
+  <!-- ==================== Dashboard ==================== -->
+  <div x-show="currentTab === 'dashboard'" x-cloak>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <!-- Windows Toast Card -->
+      <div class="card rounded-xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-blue-500/15 flex items-center justify-center text-blue-400 text-xl">W</div>
+            <div>
+              <div class="font-semibold text-white">Windows Toast</div>
+              <div class="text-xs text-gray-400">系统原生通知</div>
+            </div>
+          </div>
+          <button @click="toggleChannel('windows_toast', !config.windows_toast?.enabled)"
+                  class="relative w-11 h-6 rounded-full toggle-track"
+                  :class="config.windows_toast?.enabled ? 'bg-indigo-500' : 'bg-gray-600'">
+            <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow toggle-thumb"
+                  :class="config.windows_toast?.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
+          </button>
+        </div>
+        <!-- 提示音设置 -->
+        <div class="mb-3 flex items-center justify-between">
+          <span class="text-xs text-gray-400">提示音</span>
+          <button @click="toggleSound()"
+                  class="relative w-11 h-6 rounded-full toggle-track"
+                  :class="soundEnabled ? 'bg-indigo-500' : 'bg-gray-600'">
+            <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow toggle-thumb"
+                  :class="soundEnabled ? 'translate-x-5' : 'translate-x-0'"></span>
+          </button>
+        </div>
+        <div x-show="soundEnabled" class="mb-3">
+          <select x-model="soundType" @change="saveSoundConfig()"
+                  class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+            <option value="default">默认 (Default)</option>
+            <option value="reminder">提醒 (Reminder) - 推荐</option>
+            <option value="alarm">闹钟 (Alarm) - 最响</option>
+            <option value="call">来电 (Call)</option>
+            <option value="mail">邮件 (Mail)</option>
+            <option value="im">消息 (IM)</option>
+            <option value="sms">短信 (SMS)</option>
+          </select>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="w-2 h-2 rounded-full pulse-dot relative"
+                :class="config.windows_toast?.enabled ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+          <span x-text="config.windows_toast?.enabled ? '已启用' : '已禁用'" class="text-gray-400"></span>
+        </div>
+      </div>
+
+      <!-- WeChat Card -->
+      <div class="card rounded-xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-green-500/15 flex items-center justify-center text-green-400 text-xl">W</div>
+            <div>
+              <div class="font-semibold text-white">微信</div>
+              <div class="text-xs text-gray-400">WeChat 通知</div>
+            </div>
+          </div>
+          <button @click="toggleChannel('weixin', !config.weixin?.enabled)"
+                  class="relative w-11 h-6 rounded-full toggle-track"
+                  :class="config.weixin?.enabled ? 'bg-indigo-500' : 'bg-gray-600'">
+            <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow toggle-thumb"
+                  :class="config.weixin?.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
+          </button>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="w-2 h-2 rounded-full pulse-dot relative"
+                :class="weixinStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+          <span x-text="weixinStatus.message || '检查中...'" class="text-gray-400"></span>
+        </div>
+      </div>
+
+      <!-- QQ Card -->
+      <div class="card rounded-xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-sky-500/15 flex items-center justify-center text-sky-400 text-xl">Q</div>
+            <div>
+              <div class="font-semibold text-white">QQ Bot</div>
+              <div class="text-xs text-gray-400">QQ 通知</div>
+            </div>
+          </div>
+          <button @click="toggleChannel('qq', !config.qq?.enabled)"
+                  class="relative w-11 h-6 rounded-full toggle-track"
+                  :class="config.qq?.enabled ? 'bg-indigo-500' : 'bg-gray-600'">
+            <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow toggle-thumb"
+                  :class="config.qq?.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
+          </button>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="w-2 h-2 rounded-full pulse-dot relative"
+                :class="qqStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+          <span x-text="qqStatus.message || '检查中...'" class="text-gray-400"></span>
+        </div>
+      </div>
+
+      <!-- Telegram Card -->
+      <div class="card rounded-xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-cyan-500/15 flex items-center justify-center text-cyan-400 text-xl">T</div>
+            <div>
+              <div class="font-semibold text-white">Telegram</div>
+              <div class="text-xs text-gray-400">Bot API</div>
+            </div>
+          </div>
+          <button @click="toggleChannel('telegram', !config.telegram?.enabled)"
+                  class="relative w-11 h-6 rounded-full toggle-track"
+                  :class="config.telegram?.enabled ? 'bg-indigo-500' : 'bg-gray-600'">
+            <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow toggle-thumb"
+                  :class="config.telegram?.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
+          </button>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="w-2 h-2 rounded-full pulse-dot relative"
+                :class="tgStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+          <span x-text="tgStatus.message || '检查中...'" class="text-gray-400"></span>
+        </div>
+      </div>
+
+      <!-- 飞书 Card -->
+      <div class="card rounded-xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-blue-500/15 flex items-center justify-center text-blue-400 text-xl">F</div>
+            <div>
+              <div class="font-semibold text-white">飞书</div>
+              <div class="text-xs text-gray-400">Open API</div>
+            </div>
+          </div>
+          <button @click="toggleChannel('feishu', !config.feishu?.enabled)"
+                  class="relative w-11 h-6 rounded-full toggle-track"
+                  :class="config.feishu?.enabled ? 'bg-indigo-500' : 'bg-gray-600'">
+            <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow toggle-thumb"
+                  :class="config.feishu?.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
+          </button>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="w-2 h-2 rounded-full pulse-dot relative"
+                :class="fsStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+          <span x-text="fsStatus.message || '检查中...'" class="text-gray-400"></span>
+        </div>
+      </div>
+
+      <!-- 钉钉 Card -->
+      <div class="card rounded-xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-orange-500/15 flex items-center justify-center text-orange-400 text-xl">D</div>
+            <div>
+              <div class="font-semibold text-white">钉钉</div>
+              <div class="text-xs text-gray-400">Stream API</div>
+            </div>
+          </div>
+          <button @click="toggleChannel('dingtalk', !config.dingtalk?.enabled)"
+                  class="relative w-11 h-6 rounded-full toggle-track"
+                  :class="config.dingtalk?.enabled ? 'bg-indigo-500' : 'bg-gray-600'">
+            <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow toggle-thumb"
+                  :class="config.dingtalk?.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
+          </button>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="w-2 h-2 rounded-full pulse-dot relative"
+                :class="dtStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+          <span x-text="dtStatus.message || '检查中...'" class="text-gray-400"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Permission Mode -->
+    <div class="card rounded-xl p-5 mb-6">
+      <h3 class="font-semibold text-white mb-3">权限模式</h3>
+      <p class="text-xs text-gray-400 mb-4">控制 Claude Code 工具调用的权限确认方式，影响通知过滤行为</p>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <button @click="setPermissionMode('default')"
+                class="rounded-lg p-4 text-left transition-all border"
+                :class="permMode === 'default' ? 'bg-indigo-500/15 border-indigo-500/50' : 'bg-gray-800/50 border-gray-700/50 hover:border-gray-600'">
+          <div class="font-medium text-sm" :class="permMode === 'default' ? 'text-indigo-300' : 'text-gray-300'">default</div>
+          <div class="text-xs text-gray-500 mt-1">每次工具调用都弹窗确认</div>
+          <div class="text-xs mt-2" :class="permMode === 'default' ? 'text-indigo-400' : 'text-gray-600'">所有操作都通知</div>
+        </button>
+        <button @click="setPermissionMode('acceptEdits')"
+                class="rounded-lg p-4 text-left transition-all border"
+                :class="permMode === 'acceptEdits' ? 'bg-emerald-500/15 border-emerald-500/50' : 'bg-gray-800/50 border-gray-700/50 hover:border-gray-600'">
+          <div class="font-medium text-sm" :class="permMode === 'acceptEdits' ? 'text-emerald-300' : 'text-gray-300'">acceptEdits</div>
+          <div class="text-xs text-gray-500 mt-1">文件编辑自动放行，Bash 仍需确认</div>
+          <div class="text-xs mt-2" :class="permMode === 'acceptEdits' ? 'text-emerald-400' : 'text-gray-600'">只有 Bash 和完成时通知</div>
+        </button>
+        <button @click="setPermissionMode('bypassPermissions')"
+                class="rounded-lg p-4 text-left transition-all border"
+                :class="permMode === 'bypassPermissions' ? 'bg-amber-500/15 border-amber-500/50' : 'bg-gray-800/50 border-gray-700/50 hover:border-gray-600'">
+          <div class="font-medium text-sm" :class="permMode === 'bypassPermissions' ? 'text-amber-300' : 'text-gray-300'">bypassPermissions</div>
+          <div class="text-xs text-gray-500 mt-1">全部自动放行，无弹窗</div>
+          <div class="text-xs mt-2" :class="permMode === 'bypassPermissions' ? 'text-amber-400' : 'text-gray-600'">只在完成时通知一次</div>
+        </button>
+      </div>
+    </div>
+
+    <!-- 交互模式卡片 -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white">交互模式</h3>
+          <p class="text-sm text-gray-500 dark:text-gray-400">
+            开启后，审批通知可直接通过终端、微信、QQ、飞书、钉钉、Telegram 回复
+          </p>
+        </div>
+        <button
+          @click="toggleInteraction()"
+          :class="interactionEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
+          class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
+        >
+          <span
+            :class="interactionEnabled ? 'translate-x-6' : 'translate-x-1'"
+            class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"
+          ></span>
+        </button>
+      </div>
+      <div x-show="interactionEnabled" x-transition class="space-y-3 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm text-gray-600 dark:text-gray-400">超时（秒，0=无限）</label>
+            <p class="text-xs text-gray-400 dark:text-gray-500">等待用户回复的时间，超时后自动取消请求并继续执行。设为 0 则一直等待直到收到回复。</p>
+          </div>
+          <input type="number" x-model.number="interactionTimeout" @change="saveInteraction()" min="0"
+            class="w-24 px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+        </div>
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm text-gray-600 dark:text-gray-400">终端显示选项</label>
+            <p class="text-xs text-gray-400 dark:text-gray-500">开启后，Claude Code 终端会显示可选选项供直接输入回复；关闭则仅通过手机端渠道回复。</p>
+          </div>
+          <button @click="interactionShowTerminal = !interactionShowTerminal; saveInteraction()"
+            :class="interactionShowTerminal ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
+            class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors">
+            <span :class="interactionShowTerminal ? 'translate-x-5' : 'translate-x-0.5'"
+              class="inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="card rounded-xl p-5 mb-6">
+      <h3 class="font-semibold text-white mb-4">快捷操作</h3>
+      <div class="flex flex-wrap gap-3">
+        <button @click="testNotifications()" class="btn-primary px-4 py-2 rounded-lg text-sm text-white font-medium">
+          测试所有已启用渠道
+        </button>
+        <button @click="installHooks()" class="btn-primary px-4 py-2 rounded-lg text-sm text-white font-medium">
+          安装 Hooks
+        </button>
+        <button @click="uninstallHooks()" class="btn-danger px-4 py-2 rounded-lg text-sm text-white font-medium">
+          卸载 Hooks
+        </button>
+        <button @click="refreshAll()" class="px-4 py-2 rounded-lg text-sm text-gray-300 bg-gray-700/50 hover:bg-gray-700 transition font-medium">
+          刷新状态
+        </button>
+      </div>
+    </div>
+
+    <!-- System Info -->
+    <div class="card rounded-xl p-5">
+      <h3 class="font-semibold text-white mb-3">系统信息</h3>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div>
+          <div class="text-gray-500 text-xs">Python</div>
+          <div class="text-gray-300" x-text="status.python_version?.split(' ')[0] || '-'"></div>
+        </div>
+        <div>
+          <div class="text-gray-500 text-xs">Hooks</div>
+          <div class="text-gray-300" x-text="status.hooks_installed ? '已安装' : '未安装'"></div>
+        </div>
+        <div>
+          <div class="text-gray-500 text-xs">已启用渠道</div>
+          <div class="text-gray-300" x-text="enabledChannelCount"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== WeChat Tab ==================== -->
+  <div x-show="currentTab === 'weixin'" x-cloak>
+    <div class="card rounded-xl p-6 mb-6">
+      <h3 class="font-semibold text-white mb-4 flex items-center gap-2">
+        <span class="w-8 h-8 rounded-lg bg-green-500/15 flex items-center justify-center text-green-400 text-sm">W</span>
+        微信通知配置
+      </h3>
+
+      <div class="mb-6 p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
+        <p class="text-xs text-gray-400">
+          微信通知通过 ilink Bot API 直接发送，无需安装 OpenClaw。扫码登录后即可使用。
+        </p>
+      </div>
+
+      <!-- Login Status -->
+      <div class="mb-6 p-4 rounded-lg" :class="weixinStatus.logged_in ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-gray-700/30 border border-gray-600/30'">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="w-3 h-3 rounded-full" :class="weixinStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+            <div>
+              <div class="text-sm font-medium text-white" x-text="weixinStatus.logged_in ? '已登录' : '未登录'"></div>
+              <div class="text-xs text-gray-400 mt-0.5" x-text="weixinStatus.message || ''"></div>
+              <div x-show="weixinStatus.ilink_user_id" class="text-xs text-gray-500 mt-0.5">用户 ID: <span x-text="weixinStatus.ilink_user_id"></span></div>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button @click="refreshWeixinStatus()" class="px-3 py-1.5 text-xs rounded-lg bg-gray-700/50 hover:bg-gray-700 text-gray-300 transition">刷新</button>
+            <button x-show="weixinStatus.logged_in" @click="weixinLogout()"
+                    class="px-3 py-1.5 text-xs rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-400 transition">清除登录</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 重要提示 -->
+      <div class="mb-6 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+        <div class="flex items-start gap-2">
+          <span class="text-amber-400 mt-0.5">⚠</span>
+          <div class="text-xs text-amber-200/90">
+            <div class="font-medium mb-1">首次使用须知</div>
+            <div>扫码登录成功后，需要在微信中找到你的 bot 并发送一条消息（如"你好"），建立会话后才能收到通知。这是 ilink Bot API 的要求。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- QR Login -->
+      <div class="mb-6">
+        <h4 class="text-sm font-medium text-gray-300 mb-3">扫码登录</h4>
+        <p class="text-xs text-gray-500 mb-3">点击按钮获取微信二维码，使用微信扫码授权后自动完成登录。</p>
+        <button @click="startWeixinQR()" :disabled="qrLogin.in_progress"
+                class="btn-primary px-5 py-2.5 rounded-lg text-sm text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+          <span x-show="!qrLogin.in_progress">获取二维码</span>
+          <span x-show="qrLogin.in_progress" class="flex items-center gap-2">
+            <svg class="animate-spin w-4 h-4" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" opacity="0.3"/><path fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"/></svg>
+            <span x-text="qrLogin.status === 'scaned' ? '已扫码，等待确认...' : '等待扫码...'"></span>
+          </span>
+        </button>
+      </div>
+
+      <!-- QR Code Display -->
+      <div x-show="qrLogin.qr_url" class="mb-6">
+        <h4 class="text-sm font-medium text-gray-300 mb-3">请使用微信扫描二维码</h4>
+        <div class="bg-white rounded-xl p-4 inline-block shadow-lg">
+          <div id="qrcode-canvas" class="w-56 h-56 flex items-center justify-center"></div>
+        </div>
+        <p class="text-xs text-gray-500 mt-2">二维码有效期 5 分钟，过期后自动刷新</p>
+        <div x-show="qrLogin.error" class="mt-3 text-sm text-red-400" x-text="qrLogin.error"></div>
+        <div x-show="qrLogin.status === 'confirmed'" class="mt-3 text-sm text-emerald-400">登录成功！Token 已自动保存。</div>
+      </div>
+
+      <!-- 等待获取 to_user_id 提醒 -->
+      <div x-show="wxWaitingUserId" class="mb-6 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+        <div class="flex items-start gap-2">
+          <svg class="animate-spin w-4 h-4 text-amber-400 mt-0.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" opacity="0.3"/><path fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"/></svg>
+          <div class="text-xs text-amber-200/90">
+            <div class="font-medium mb-1">正在等待获取接收用户 ID...</div>
+            <div>请在微信中找到你的 Bot 并发送一条消息（如"你好"），系统会自动捕获用户 ID。</div>
+            <div class="mt-1 text-amber-300/60">超时时间 2 分钟。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Manual Config -->
+      <div class="mt-6 pt-6 border-t border-gray-700/50">
+        <h4 class="text-sm font-medium text-gray-300 mb-3">手动配置（可选）</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Bot Token</label>
+            <input type="password" x-model="wxForm.bot_token" placeholder="ilink bot token"
+                   class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Base URL</label>
+            <input type="text" x-model="wxForm.baseurl" placeholder="https://ilinkai.weixin.qq.com"
+                   class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">接收用户 ID (to_user_id)</label>
+            <input type="text" x-model="wxForm.to_user_id" placeholder="ilink_user_id，扫码登录后自动填入"
+                   class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+          </div>
+        </div>
+        <button @click="saveWeixinConfig()" class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium mt-4">
+          保存配置
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== QQ Tab ==================== -->
+  <div x-show="currentTab === 'qq'" x-cloak>
+    <div class="card rounded-xl p-6 mb-6">
+      <h3 class="font-semibold text-white mb-4 flex items-center gap-2">
+        <span class="w-8 h-8 rounded-lg bg-sky-500/15 flex items-center justify-center text-sky-400 text-sm">Q</span>
+        QQ Bot 通知配置
+      </h3>
+
+      <div class="mb-6 p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
+        <p class="text-xs text-gray-400">
+          QQ Bot 需要在 <a href="https://q.qq.com/" target="_blank" class="text-indigo-400 hover:underline">QQ 开放平台</a> 创建机器人获取 AppID 和 AppSecret。
+        </p>
+        <p class="text-xs text-gray-500 mt-2">
+          验证凭据后，系统会自动通过 WebSocket 监听 QQ 消息事件。在 QQ 中给 bot 发送一条消息，系统将自动获取你的 OpenID 并完成配置。
+        </p>
+      </div>
+
+      <!-- Login Status -->
+      <div class="mb-6 p-4 rounded-lg" :class="qqStatus.logged_in ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-gray-700/30 border border-gray-600/30'">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="w-3 h-3 rounded-full" :class="qqStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+            <div>
+              <div class="text-sm font-medium text-white" x-text="qqStatus.logged_in ? '已配置' : '未配置'"></div>
+              <div class="text-xs text-gray-400 mt-0.5" x-text="qqStatus.message || ''"></div>
+              <div x-show="qqStatus.app_id" class="text-xs text-gray-500 mt-0.5">AppID: <span x-text="qqStatus.app_id"></span></div>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button @click="refreshQQStatus()" class="px-3 py-1.5 text-xs rounded-lg bg-gray-700/50 hover:bg-gray-700 text-gray-300 transition">刷新</button>
+            <button x-show="qqStatus.logged_in" @click="qqLogout()"
+                    class="px-3 py-1.5 text-xs rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-400 transition">清除登录</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- QQ Config Form -->
+      <div>
+        <h4 class="text-sm font-medium text-gray-300 mb-3">Bot 凭据</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">AppID</label>
+            <input type="text" x-model="qqForm.app_id" placeholder="QQ Bot AppID"
+                   class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">AppSecret</label>
+            <input type="password" x-model="qqForm.app_secret" placeholder="QQ Bot AppSecret"
+                   class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+          </div>
+        </div>
+        <div class="flex gap-3">
+          <button @click="validateQQ()" :disabled="qqValidating || qqWaitingOpenId"
+                  class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium disabled:opacity-50">
+            <span x-show="!qqValidating && !qqWaitingOpenId">验证并保存</span>
+            <span x-show="qqValidating">验证中...</span>
+            <span x-show="qqWaitingOpenId">等待获取 OpenID...</span>
+          </button>
+          </button>
+        </div>
+
+        <!-- 等待 OpenID 提示 -->
+        <div x-show="qqWaitingOpenId" class="mt-4 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+          <div class="flex items-start gap-2">
+            <svg class="animate-spin w-4 h-4 text-amber-400 mt-0.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" opacity="0.3"/><path fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"/></svg>
+            <div class="text-xs text-amber-200/90">
+              <div class="font-medium mb-1">正在等待获取 OpenID...</div>
+              <div>请在 QQ 中找到你的 bot 并发送一条消息（如"你好"），系统会自动捕获你的 OpenID。</div>
+              <div class="mt-1 text-amber-300/60">超时时间 2 分钟，也可手动填入 Target ID。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== Telegram Tab ==================== -->
+  <div x-show="currentTab === 'telegram'" x-cloak>
+    <div class="card rounded-xl p-6 mb-6">
+      <h3 class="font-semibold text-white mb-4 flex items-center gap-2">
+        <span class="w-8 h-8 rounded-lg bg-cyan-500/15 flex items-center justify-center text-cyan-400 text-sm">T</span>
+        Telegram Bot 配置
+      </h3>
+
+      <div class="mb-6 p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
+        <p class="text-xs text-gray-400 font-medium mb-2">配置步骤：</p>
+        <ol class="text-xs text-gray-400 space-y-1 list-decimal list-inside">
+          <li>在 Telegram 中找 <a href="https://t.me/BotFather" target="_blank" class="text-indigo-400 hover:underline">@BotFather</a>，发送 <code class="bg-gray-700/50 px-1 rounded">/newbot</code> 创建 Bot</li>
+          <li>获取 Bot Token，填入下方验证</li>
+          <li>验证成功后，给 Bot 发送一条消息，系统自动获取 Chat ID</li>
+        </ol>
+      </div>
+
+      <div class="mb-6 p-4 rounded-lg" :class="tgStatus.logged_in ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-gray-700/30 border border-gray-600/30'">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="w-3 h-3 rounded-full" :class="tgStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+            <div>
+              <div class="text-sm font-medium text-white" x-text="tgStatus.logged_in ? '已配置' : '未配置'"></div>
+              <div class="text-xs text-gray-400 mt-0.5" x-text="tgStatus.message || ''"></div>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button @click="refreshTgStatus()" class="px-3 py-1.5 text-xs rounded-lg bg-gray-700/50 hover:bg-gray-700 text-gray-300 transition">刷新</button>
+            <button x-show="tgStatus.logged_in" @click="tgLogout()"
+                    class="px-3 py-1.5 text-xs rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-400 transition">清除</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h4 class="text-sm font-medium text-gray-300 mb-3">Bot Token</h4>
+        <div class="mb-4">
+          <input type="password" x-model="tgForm.bot_token" placeholder="从 @BotFather 获取"
+                 class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+        </div>
+        <button @click="validateTg()" :disabled="tgWaitingChatId"
+                class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium disabled:opacity-50">
+          <span x-show="!tgWaitingChatId">验证并保存</span>
+          <span x-show="tgWaitingChatId">等待获取 Chat ID...</span>
+        </button>
+
+        <div x-show="tgWaitingChatId" class="mt-4 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+          <div class="flex items-start gap-2">
+            <svg class="animate-spin w-4 h-4 text-amber-400 mt-0.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" opacity="0.3"/><path fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"/></svg>
+            <div class="text-xs text-amber-200/90">
+              <div class="font-medium mb-1">正在等待获取 Chat ID...</div>
+              <div>请在 Telegram 中找到你的 Bot 并发送一条消息（如"你好"），系统会自动捕获 Chat ID。</div>
+              <div class="mt-1 text-amber-300/60">超时时间 2 分钟，也可手动填入 Chat ID。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 飞书 Tab ==================== -->
+  <div x-show="currentTab === 'feishu'" x-cloak>
+    <div class="card rounded-xl p-6 mb-6">
+      <h3 class="font-semibold text-white mb-4 flex items-center gap-2">
+        <span class="w-8 h-8 rounded-lg bg-blue-500/15 flex items-center justify-center text-blue-400 text-sm">F</span>
+        飞书 Bot 配置
+      </h3>
+
+      <div class="mb-6 p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
+        <p class="text-xs text-gray-400 font-medium mb-2">配置步骤：</p>
+        <ol class="text-xs text-gray-400 space-y-1 list-decimal list-inside">
+          <li>在 <a href="https://open.feishu.cn/" target="_blank" class="text-indigo-400 hover:underline">飞书开放平台</a> 创建企业自建应用</li>
+          <li>开启<b>机器人</b>能力</li>
+          <li><b>权限管理</b> → 搜索并开启以下权限：
+            <ul class="ml-6 mt-1 space-y-0.5 list-disc">
+              <li><code class="bg-gray-700/50 px-1 rounded">im:message</code> — 获取与发送消息</li>
+              <li><code class="bg-gray-700/50 px-1 rounded">im:message.receive_v1</code> — 接收消息事件</li>
+              <li><code class="bg-gray-700/50 px-1 rounded">auth:user_access_token:read</code> — 用户信息</li>
+            </ul>
+          </li>
+          <li><b>事件订阅</b> → 连接方式选择 <b>WebSocket</b> → 添加事件 <code class="bg-gray-700/50 px-1 rounded">im.message.receive_v1</code></li>
+          <li>发布应用（至少发布到企业内部），权限变更后需重新发布版本才生效</li>
+          <li>验证凭据后，在飞书中找到 Bot 发送一条消息，系统自动获取 Open ID</li>
+        </ol>
+      </div>
+
+      <div class="mb-6 p-4 rounded-lg" :class="fsStatus.logged_in ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-gray-700/30 border border-gray-600/30'">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="w-3 h-3 rounded-full" :class="fsStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+            <div>
+              <div class="text-sm font-medium text-white" x-text="fsStatus.logged_in ? '已配置' : '未配置'"></div>
+              <div class="text-xs text-gray-400 mt-0.5" x-text="fsStatus.message || ''"></div>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button @click="refreshFsStatus()" class="px-3 py-1.5 text-xs rounded-lg bg-gray-700/50 hover:bg-gray-700 text-gray-300 transition">刷新</button>
+            <button x-show="fsStatus.logged_in" @click="fsLogout()"
+                    class="px-3 py-1.5 text-xs rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-400 transition">清除</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h4 class="text-sm font-medium text-gray-300 mb-3">应用凭据</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">App ID</label>
+            <input type="text" x-model="fsForm.app_id" placeholder="飞书 App ID"
+                   class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Client Secret</label>
+            <input type="password" x-model="fsForm.app_secret" placeholder="飞书 App Secret"
+                   class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+          </div>
+        </div>
+        <button @click="validateFs()" :disabled="fsWaitingOpenId"
+                class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium disabled:opacity-50">
+          <span x-show="!fsWaitingOpenId">验证并保存</span>
+          <span x-show="fsWaitingOpenId">等待获取 Open ID...</span>
+        </button>
+
+        <div x-show="fsWaitingOpenId" class="mt-4 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+          <div class="flex items-start gap-2">
+            <svg class="animate-spin w-4 h-4 text-amber-400 mt-0.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" opacity="0.3"/><path fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"/></svg>
+            <div class="text-xs text-amber-200/90">
+              <div class="font-medium mb-1">正在等待获取 Open ID...</div>
+              <div>请在飞书中找到你的 Bot 并发送一条消息（如"你好"），系统会自动捕获 Open ID。</div>
+              <div class="mt-1 text-amber-300/60">超时时间 2 分钟。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 钉钉 Tab ==================== -->
+  <div x-show="currentTab === 'dingtalk'" x-cloak>
+    <div class="card rounded-xl p-6 mb-6">
+      <h3 class="font-semibold text-white mb-4 flex items-center gap-2">
+        <span class="w-8 h-8 rounded-lg bg-orange-500/15 flex items-center justify-center text-orange-400 text-sm">D</span>
+        钉钉 Bot 配置
+      </h3>
+
+      <div class="mb-6 p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
+        <p class="text-xs text-gray-400 font-medium mb-2">配置步骤：</p>
+        <ol class="text-xs text-gray-400 space-y-1 list-decimal list-inside">
+          <li>在 <a href="https://open.dingtalk.com/" target="_blank" class="text-indigo-400 hover:underline">钉钉开放平台</a> 创建应用</li>
+          <li>添加<b>机器人</b>能力，在「消息接收模式」中选择 <b>Stream 模式</b></li>
+          <li><b>权限管理</b> → 搜索并开启以下权限：
+            <ul class="ml-6 mt-1 space-y-0.5 list-disc">
+              <li><code class="bg-gray-700/50 px-1 rounded">qyapi_robot_sendmsg</code> — 发送消息</li>
+              <li><code class="bg-gray-700/50 px-1 rounded">Robot.SingleChat.ReadWrite</code> — 读写单聊消息（<b class="text-amber-400">必须开启，否则收不到用户回复</b>）</li>
+            </ul>
+          </li>
+          <li>获取 Client ID 和 Client Secret（在应用凭证页面）</li>
+          <li>发布应用</li>
+          <li>验证凭据后，在钉钉中找到 Bot 发送一条消息，系统自动获取 User ID</li>
+        </ol>
+        <p class="text-xs text-gray-500 mt-2">💡 机器人接收消息的能力内置于「机器人」能力中，无需在「事件订阅」中单独添加事件。</p>
+      </div>
+
+      <div class="mb-6 p-4 rounded-lg" :class="dtStatus.logged_in ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-gray-700/30 border border-gray-600/30'">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="w-3 h-3 rounded-full" :class="dtStatus.logged_in ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+            <div>
+              <div class="text-sm font-medium text-white" x-text="dtStatus.logged_in ? '已配置' : '未配置'"></div>
+              <div class="text-xs text-gray-400 mt-0.5" x-text="dtStatus.message || ''"></div>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button @click="refreshDtStatus()" class="px-3 py-1.5 text-xs rounded-lg bg-gray-700/50 hover:bg-gray-700 text-gray-300 transition">刷新</button>
+            <button x-show="dtStatus.logged_in" @click="dtLogout()"
+                    class="px-3 py-1.5 text-xs rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-400 transition">清除</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h4 class="text-sm font-medium text-gray-300 mb-3">应用凭据</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Client ID</label>
+            <input type="text" x-model="dtForm.client_id" placeholder="钉钉 Client ID"
+                   class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Client Secret</label>
+            <input type="password" x-model="dtForm.client_secret" placeholder="钉钉 Client Secret"
+                   class="w-full bg-gray-800/50 border border-gray-600/50 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none transition">
+          </div>
+        </div>
+        <button @click="validateDt()" :disabled="dtWaitingUserId"
+                class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium disabled:opacity-50">
+          <span x-show="!dtWaitingUserId">验证并保存</span>
+          <span x-show="dtWaitingUserId">等待获取 User ID...</span>
+        </button>
+
+        <div x-show="dtWaitingUserId" class="mt-4 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+          <div class="flex items-start gap-2">
+            <svg class="animate-spin w-4 h-4 text-amber-400 mt-0.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" opacity="0.3"/><path fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"/></svg>
+            <div class="text-xs text-amber-200/90">
+              <div class="font-medium mb-1">正在等待获取 User ID...</div>
+              <div>请在钉钉中找到你的 Bot 并发送一条消息（如"你好"），系统会自动捕获 User ID。</div>
+              <div class="mt-1 text-amber-300/60">超时时间 2 分钟。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== Hooks Tab ==================== -->
+  <div x-show="currentTab === 'hooks'" x-cloak>
+    <div class="card rounded-xl p-6 mb-6">
+      <h3 class="font-semibold text-white mb-4">Hook 管理</h3>
+      <p class="text-xs text-gray-400 mb-4">
+        Claude Code 通过 hooks 机制在特定事件触发时调用通知脚本。安装后，Claude 的各种操作（完成、询问、编辑文件、执行命令等）都会自动发送通知。
+      </p>
+
+      <!-- Hook Status -->
+      <div class="space-y-3 mb-6">
+        <template x-for="(installed, event) in hooksInfo.events" :key="event">
+          <div class="flex items-center justify-between p-3 rounded-lg bg-gray-800/30">
+            <div class="flex items-center gap-3">
+              <span class="w-2 h-2 rounded-full" :class="installed ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+              <div>
+                <div class="text-sm font-medium text-gray-200" x-text="event"></div>
+                <div class="text-xs text-gray-500" x-text="hookDescriptions[event] || ''"></div>
+              </div>
+            </div>
+            <span class="text-xs px-2 py-0.5 rounded-full"
+                  :class="installed ? 'bg-emerald-500/15 text-emerald-400' : 'bg-gray-600/30 text-gray-400'"
+                  x-text="installed ? '已安装' : '未安装'"></span>
+          </div>
+        </template>
+      </div>
+
+      <!-- PreToolUse Matchers -->
+      <div x-show="hooksInfo.tool_matchers?.length" class="mb-6">
+        <h4 class="text-sm font-medium text-gray-300 mb-2">PreToolUse 监控的工具类型</h4>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="m in hooksInfo.tool_matchers" :key="m">
+            <span class="px-2 py-1 text-xs rounded-md bg-indigo-500/10 text-indigo-300 border border-indigo-500/20" x-text="m"></span>
+          </template>
+        </div>
+      </div>
+
+      <div class="flex gap-3">
+        <button @click="installHooks()" class="btn-primary px-5 py-2 rounded-lg text-sm text-white font-medium">
+          安装全部 Hooks
+        </button>
+        <button @click="uninstallHooks()" class="btn-danger px-5 py-2 rounded-lg text-sm text-white font-medium">
+          卸载全部 Hooks
+        </button>
+      </div>
+    </div>
+
+    <div class="card rounded-xl p-6">
+      <h3 class="font-semibold text-white mb-3">settings.json 路径</h3>
+      <code class="text-xs text-indigo-300 bg-indigo-500/10 px-3 py-1.5 rounded-lg inline-block">~/.claude/settings.json</code>
+    </div>
+  </div>
+
+  <!-- ==================== Logs Tab ==================== -->
+  <div x-show="currentTab === 'logs'" x-cloak>
+    <div class="card rounded-xl p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-semibold text-white">运行日志</h3>
+        <div class="flex gap-2">
+          <button @click="loadLogs()" class="px-3 py-1.5 text-xs rounded-lg bg-gray-700/50 hover:bg-gray-700 text-gray-300 transition">刷新</button>
+          <button @click="clearLogs()" class="px-3 py-1.5 text-xs rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-400 transition">清除日志</button>
+        </div>
+      </div>
+      <div class="bg-black/40 rounded-lg p-4 max-h-96 overflow-y-auto font-mono">
+        <template x-if="logLines.length === 0">
+          <div class="text-gray-500 text-sm">暂无日志</div>
+        </template>
+        <template x-for="(line, i) in logLines" :key="i">
+          <div class="log-line text-gray-400 py-0.5 hover:text-gray-200 transition" x-text="line"></div>
+        </template>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="text-center text-xs text-gray-600 py-6">
+  Claude Code 通知管理器 v2.1 &middot; ilink Bot API &middot; <a href="https://github.com/Tencent/openclaw-weixin" class="hover:text-gray-400" target="_blank">openclaw-weixin</a> &middot; <a href="https://github.com/tencent-connect/openclaw-qqbot" class="hover:text-gray-400" target="_blank">openclaw-qqbot</a>
+</footer>
+
+<script>
+function app() {
+  return {
+    currentTab: 'dashboard',
+    tabs: [
+      { id: 'dashboard', label: '仪表盘' },
+      { id: 'weixin', label: '微信' },
+      { id: 'qq', label: 'QQ Bot' },
+      { id: 'telegram', label: 'Telegram' },
+      { id: 'feishu', label: '飞书' },
+      { id: 'dingtalk', label: '钉钉' },
+      { id: 'hooks', label: 'Hooks' },
+      { id: 'logs', label: '日志' },
+    ],
+    config: {},
+    status: {},
+    weixinStatus: {},
+    qqStatus: {},
+    hooksInfo: { installed: false, events: {}, tool_matchers: [] },
+    logLines: [],
+    toasts: [],
+    toastId: 0,
+
+    hookDescriptions: {
+      'Stop': 'Claude 完成输出时通知',
+      'Elicitation': 'MCP 服务器请求用户输入时通知',
+      'PreToolUse': '工具执行前通知（Bash/Edit/Write/MCP 等）',
+    },
+
+    qrLogin: { in_progress: false, qr_url: null, status: 'idle', error: null },
+    wxForm: { bot_token: '', baseurl: 'https://ilinkai.weixin.qq.com', to_user_id: '' },
+    wxWaitingUserId: false,
+    _wxPollTimer: null,
+    qqForm: { app_id: '', app_secret: '', target_id: '' },
+    tgForm: { bot_token: '' },
+    tgStatus: {},
+    tgWaitingChatId: false,
+    _tgPollTimer: null,
+    fsForm: { app_id: '', app_secret: '' },
+    fsStatus: {},
+    fsWaitingOpenId: false,
+    _fsPollTimer: null,
+    dtForm: { client_id: '', client_secret: '' },
+    dtStatus: {},
+    dtWaitingUserId: false,
+    _dtPollTimer: null,
+    qqValidating: false,
+    qqWaitingOpenId: false,
+    permMode: 'default',
+    interactionEnabled: false,
+    interactionTimeout: 0,
+    interactionShowTerminal: true,
+    soundEnabled: true,
+    soundType: 'reminder',
+    _qqPollTimer: null,
+
+    _qrPollTimer: null,
+    _sseSource: null,
+
+    async init() {
+      await this.refreshAll();
+      await this.loadInteraction();
+      // SSE 持久连接：连接断开 = 标签页关闭，服务端自动退出
+      this._sseSource = new EventSource('/api/stream');
+      this._sseSource.onmessage = () => {};
+      this._sseSource.onerror = () => {
+        // 连接断开后浏览器会自动重连，无需处理
+      };
+      // 页面关闭时主动关闭 SSE 连接
+      window.addEventListener('beforeunload', () => {
+        if (this._sseSource) {
+          this._sseSource.close();
+          this._sseSource = null;
+        }
+      });
+    },
+
+    get enabledChannelCount() {
+      const c = this.config;
+      let n = 0;
+      if (c.windows_toast?.enabled) n++;
+      if (c.weixin?.enabled) n++;
+      if (c.qq?.enabled) n++;
+      if (c.telegram?.enabled) n++;
+      if (c.feishu?.enabled) n++;
+      if (c.dingtalk?.enabled) n++;
+      return n + '/6';
+    },
+
+    toast(type, title, message = '') {
+      const id = ++this.toastId;
+      this.toasts.push({ id, type, title, message });
+      setTimeout(() => this.removeToast(id), 5000);
+    },
+    removeToast(id) { this.toasts = this.toasts.filter(t => t.id !== id); },
+
+    async api(method, path, body = null) {
+      const opts = { method, headers: { 'Content-Type': 'application/json' } };
+      if (body) opts.body = JSON.stringify(body);
+      const r = await fetch(path, opts);
+      const data = await r.json();
+      if (!r.ok && !data.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      return data;
+    },
+
+    async refreshAll() {
+      try {
+        // 并行加载，单个失败不影响其他
+        const safe = async (fn) => { try { return await fn(); } catch (e) { return {}; } };
+        const [cfg, st, wx, qq, tg, fs, dt, hk, lg, pm] = await Promise.all([
+          safe(() => this.api('GET', '/api/config')),
+          safe(() => this.api('GET', '/api/status')),
+          safe(() => this.api('GET', '/api/weixin/status')),
+          safe(() => this.api('GET', '/api/qq/status')),
+          safe(() => this.api('GET', '/api/telegram/status')),
+          safe(() => this.api('GET', '/api/feishu/status')),
+          safe(() => this.api('GET', '/api/dingtalk/status')),
+          safe(() => this.api('GET', '/api/hooks')),
+          safe(() => this.api('GET', '/api/logs?lines=50')),
+          safe(() => this.api('GET', '/api/permission-mode')),
+        ]);
+        this.config = cfg || {};
+        this.status = st || {};
+        this.weixinStatus = wx || {};
+        this.qqStatus = qq || {};
+        this.tgStatus = tg || {};
+        this.fsStatus = fs || {};
+        this.dtStatus = dt || {};
+        this.hooksInfo = hk || { installed: false, events: {}, tool_matchers: [] };
+        this.logLines = (lg && lg.lines) || [];
+        this.permMode = (pm && pm.mode) || 'default';
+        // 读取提示音配置
+        const wtSound = cfg.windows_toast?.sound || 'reminder';
+        this.soundEnabled = wtSound !== 'silent';
+        this.soundType = wtSound === 'silent' ? 'reminder' : wtSound;
+        if (cfg.weixin) {
+          this.wxForm.baseurl = cfg.weixin.baseurl || 'https://ilinkai.weixin.qq.com';
+          if (cfg.weixin.to_user_id) this.wxForm.to_user_id = cfg.weixin.to_user_id;
+          if (cfg.weixin.bot_token) this.wxForm.bot_token = cfg.weixin.bot_token;
+        }
+        if (cfg.qq) {
+          this.qqForm.app_id = cfg.qq.app_id || '';
+          this.qqForm.target_id = cfg.qq.target_id || '';
+        }
+      } catch (e) {
+        this.toast('error', '刷新失败', e.message);
+      }
+    },
+
+    async toggleChannel(name, enabled) {
+      try {
+        await this.api('POST', `/api/channel/${name}/toggle`, { enabled });
+        this.config[name].enabled = enabled;
+        this.toast('success', `${name} ${enabled ? '已启用' : '已禁用'}`);
+      } catch (e) {
+        this.toast('error', '操作失败', e.message);
+        this.config[name].enabled = !enabled;
+      }
+    },
+
+    async setPermissionMode(mode) {
+      try {
+        const r = await this.api('PUT', '/api/permission-mode', { mode });
+        if (r.ok) {
+          this.permMode = mode;
+          this.toast('success', '权限模式已切换', mode);
+        } else {
+          this.toast('error', '切换失败', r.error || '未知错误');
+        }
+      } catch (e) { this.toast('error', '切换失败', e.message); }
+    },
+
+    async toggleSound() {
+      this.soundEnabled = !this.soundEnabled;
+      await this.saveSoundConfig();
+    },
+
+    async saveSoundConfig() {
+      const sound = this.soundEnabled ? this.soundType : 'silent';
+      try {
+        await this.api('PUT', '/api/config', { windows_toast: { sound } });
+        this.toast('success', '提示音已' + (this.soundEnabled ? '开启' : '关闭'), this.soundEnabled ? `音效: ${this.soundType}` : '');
+      } catch (e) { this.toast('error', '保存失败', e.message); }
+    },
+
+    async testNotifications() {
+      try {
+        const r = await this.api('POST', '/api/test');
+        if (r.results?.length) {
+          for (const res of r.results) {
+            this.toast(res.success ? 'success' : 'error', `${res.channel}: ${res.success ? '发送成功' : '发送失败'}`);
+          }
+        } else {
+          this.toast('info', '没有已启用的渠道');
+        }
+      } catch (e) { this.toast('error', '测试失败', e.message); }
+    },
+
+    async installHooks() {
+      try {
+        await this.api('POST', '/api/hooks/install');
+        this.toast('success', 'Hooks 已安装', '重启 Claude Code 后生效');
+        await this.refreshAll();
+      } catch (e) { this.toast('error', '安装失败', e.message); }
+    },
+
+    async uninstallHooks() {
+      try {
+        await this.api('POST', '/api/hooks/uninstall');
+        this.toast('success', 'Hooks 已卸载');
+        await this.refreshAll();
+      } catch (e) { this.toast('error', '卸载失败', e.message); }
+    },
+
+    // === WeChat ===
+    _renderQR(url) {
+      const el = document.getElementById('qrcode-canvas');
+      if (!el || !url) return;
+      el.innerHTML = '';
+      try {
+        const qr = qrcode(0, 'M');
+        qr.addData(url);
+        qr.make();
+        el.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0 });
+        const svg = el.querySelector('svg');
+        if (svg) { svg.style.width = '100%'; svg.style.height = '100%'; }
+      } catch (e) {
+        el.innerHTML = '<span class="text-red-500 text-xs">QR 生成失败</span>';
+      }
+    },
+
+    async startWeixinQR() {
+      try {
+        await this.api('POST', '/api/weixin/qr');
+        this.qrLogin.in_progress = true;
+        this.qrLogin.qr_url = null;
+        this.qrLogin.status = 'wait';
+        this.qrLogin.error = null;
+        this.toast('info', '正在获取二维码...');
+        this._startQRPoll();
+      } catch (e) { this.toast('error', '启动失败', e.message); }
+    },
+
+    _startQRPoll() {
+      if (this._qrPollTimer) clearInterval(this._qrPollTimer);
+      this._qrPollTimer = setInterval(async () => {
+        try {
+          const r = await this.api('GET', '/api/weixin/qr/status');
+          if (r.qr_img_url && !this.qrLogin.qr_url) {
+            this.qrLogin.qr_url = r.qr_img_url;
+            this.$nextTick(() => this._renderQR(r.qr_img_url));
+          }
+          if (r.status) this.qrLogin.status = r.status;
+          if (r.status === 'confirmed') {
+            this.qrLogin.in_progress = false;
+            clearInterval(this._qrPollTimer);
+            this.toast('success', '微信登录成功', 'Token 已自动保存');
+            await this.refreshAll();
+            // 扫码成功后始终显示提醒，等待用户发消息获取 to_user_id
+            this.wxWaitingUserId = true;
+            this._startWxUserIdPoll();
+          }
+          if (r.status === 'expired') {
+            this.qrLogin.in_progress = false;
+            clearInterval(this._qrPollTimer);
+            this.toast('error', '二维码已过期', '请重新获取');
+          }
+          if (r.status === 'error') {
+            this.qrLogin.error = r.error;
+            this.qrLogin.in_progress = false;
+            clearInterval(this._qrPollTimer);
+            this.toast('error', '登录失败', r.error);
+          }
+        } catch (e) {}
+      }, 2000);
+    },
+
+    _startWxUserIdPoll() {
+      if (this._wxPollTimer) clearInterval(this._wxPollTimer);
+      let attempts = 0;
+      this._wxPollTimer = setInterval(async () => {
+        attempts++;
+        try {
+          const cfg = await this.api('GET', '/api/config');
+          if (cfg.weixin && cfg.weixin.to_user_id) {
+            this.wxForm.to_user_id = cfg.weixin.to_user_id;
+            this.wxWaitingUserId = false;
+            clearInterval(this._wxPollTimer);
+            this._wxPollTimer = null;
+            this.toast('success', '已自动获取接收用户 ID', cfg.weixin.to_user_id);
+            return;
+          }
+        } catch (e) {}
+        if (attempts >= 60) { // 2 分钟超时
+          this.wxWaitingUserId = false;
+          clearInterval(this._wxPollTimer);
+          this._wxPollTimer = null;
+          this.toast('info', '获取超时', '请在微信中给 bot 发送消息后，接收用户 ID 会自动填入');
+        }
+      }, 2000);
+    },
+
+    async refreshWeixinStatus() {
+      try { this.weixinStatus = await this.api('GET', '/api/weixin/status'); } catch (e) {}
+    },
+
+    async weixinLogout() {
+      if (!confirm('确定要清除微信登录信息吗？')) return;
+      try {
+        await this.api('POST', '/api/weixin/logout');
+        this.toast('success', '微信登录已清除');
+        await this.refreshAll();
+      } catch (e) { this.toast('error', '清除失败', e.message); }
+    },
+
+    async saveWeixinConfig() {
+      try {
+        // 只发送非空字段，避免覆盖 QR 登录保存的 token
+        const payload = {};
+        for (const [k, v] of Object.entries(this.wxForm)) {
+          if (v !== '' && v !== null && v !== undefined) payload[k] = v;
+        }
+        await this.api('PUT', '/api/config', { weixin: payload });
+        this.toast('success', '微信配置已保存');
+        await this.refreshAll();
+      } catch (e) { this.toast('error', '保存失败', e.message); }
+    },
+
+    // === QQ ===
+    async validateQQ() {
+      if (!this.qqForm.app_id || !this.qqForm.app_secret) {
+        this.toast('error', '请填写 AppID 和 AppSecret');
+        return;
+      }
+      this.qqValidating = true;
+      try {
+        const r = await this.api('POST', '/api/qq/validate', this.qqForm);
+        if (r.ok) {
+          this.toast('success', '验证成功', '正在自动获取 OpenID...');
+          // 如果没有 target_id，开始轮询等待用户发消息
+          if (!this.qqForm.target_id) {
+            this.qqWaitingOpenId = true;
+            this._startQQOpenIdPoll();
+          }
+          await this.refreshAll();
+        } else {
+          this.toast('error', '验证失败', r.error);
+        }
+      } catch (e) { this.toast('error', '验证失败', e.message); }
+      finally { this.qqValidating = false; }
+    },
+
+    _startQQOpenIdPoll() {
+      if (this._qqPollTimer) clearInterval(this._qqPollTimer);
+      let attempts = 0;
+      this._qqPollTimer = setInterval(async () => {
+        attempts++;
+        try {
+          const cfg = await this.api('GET', '/api/config');
+          if (cfg.qq && cfg.qq.target_id) {
+            this.qqForm.target_id = cfg.qq.target_id;
+            this.qqWaitingOpenId = false;
+            clearInterval(this._qqPollTimer);
+            this.toast('success', '已自动获取 OpenID', cfg.qq.target_id);
+            await this.refreshAll();
+            return;
+          }
+        } catch (e) {}
+        if (attempts >= 60) { // 2 分钟超时
+          this.qqWaitingOpenId = false;
+          clearInterval(this._qqPollTimer);
+          this.toast('info', '获取超时', '请在 QQ 中给 bot 发送消息后手动填入 Target ID');
+        }
+      }, 2000);
+    },
+
+    async saveQQConfig() {
+      try {
+        await this.api('PUT', '/api/config', { qq: this.qqForm });
+        this.toast('success', 'QQ 配置已保存');
+        await this.refreshAll();
+      } catch (e) { this.toast('error', '保存失败', e.message); }
+    },
+
+    async refreshQQStatus() {
+      try { this.qqStatus = await this.api('GET', '/api/qq/status'); } catch (e) {}
+    },
+
+    async qqLogout() {
+      if (!confirm('确定要清除 QQ Bot 登录信息吗？')) return;
+      try {
+        await this.api('POST', '/api/qq/logout');
+        this.toast('success', 'QQ Bot 登录已清除');
+        await this.refreshAll();
+      } catch (e) { this.toast('error', '清除失败', e.message); }
+    },
+
+    // Telegram
+    async validateTg() {
+      try {
+        const r = await this.api('POST', '/api/telegram/validate', { bot_token: this.tgForm.bot_token });
+        if (r.ok) {
+          this.tgForm.bot_token = '';
+          this.toast('success', 'Telegram 验证成功', r.message);
+          // 检查是否已有 chat_id
+          await this.refreshTgStatus();
+          if (!this.tgStatus.chat_id) {
+            this.tgWaitingChatId = true;
+            this._startTgPoll();
+          }
+        } else {
+          this.toast('error', '验证失败', r.error);
+        }
+      } catch (e) { this.toast('error', '验证失败', e.message); }
+    },
+    _startTgPoll() {
+      if (this._tgPollTimer) clearInterval(this._tgPollTimer);
+      this._tgPollTimer = setInterval(async () => {
+        await this.refreshTgStatus();
+        if (this.tgStatus.chat_id) {
+          this.tgWaitingChatId = false;
+          clearInterval(this._tgPollTimer);
+          this._tgPollTimer = null;
+          this.toast('success', 'Chat ID 已获取', this.tgStatus.chat_id);
+        }
+      }, 3000);
+      // 2 分钟超时
+      setTimeout(() => {
+        if (this._tgPollTimer) {
+          clearInterval(this._tgPollTimer);
+          this._tgPollTimer = null;
+          this.tgWaitingChatId = false;
+        }
+      }, 120000);
+    },
+    async refreshTgStatus() {
+      try { this.tgStatus = await this.api('GET', '/api/telegram/status'); } catch (e) {}
+    },
+    async tgLogout() {
+      try {
+        await this.api('POST', '/api/telegram/logout');
+        this.tgStatus = {};
+        this.toast('success', 'Telegram 已清除');
+      } catch (e) { this.toast('error', '清除失败', e.message); }
+    },
+
+    // 飞书
+    async validateFs() {
+      try {
+        const r = await this.api('POST', '/api/feishu/validate', { app_id: this.fsForm.app_id, app_secret: this.fsForm.app_secret });
+        if (r.ok) {
+          this.fsForm.app_id = '';
+          this.fsForm.app_secret = '';
+          this.toast('success', '飞书验证成功', r.message);
+          await this.refreshFsStatus();
+          if (!this.fsStatus.receive_id) {
+            this.fsWaitingOpenId = true;
+            this._startFsPoll();
+          }
+        } else {
+          this.toast('error', '验证失败', r.error);
+        }
+      } catch (e) { this.toast('error', '验证失败', e.message); }
+    },
+    _startFsPoll() {
+      if (this._fsPollTimer) clearInterval(this._fsPollTimer);
+      this._fsPollTimer = setInterval(async () => {
+        await this.refreshFsStatus();
+        if (this.fsStatus.receive_id) {
+          this.fsWaitingOpenId = false;
+          clearInterval(this._fsPollTimer);
+          this._fsPollTimer = null;
+          this.toast('success', 'Open ID 已获取', this.fsStatus.receive_id);
+        }
+      }, 3000);
+      setTimeout(() => {
+        if (this._fsPollTimer) {
+          clearInterval(this._fsPollTimer);
+          this._fsPollTimer = null;
+          this.fsWaitingOpenId = false;
+        }
+      }, 120000);
+    },
+    async refreshFsStatus() {
+      try { this.fsStatus = await this.api('GET', '/api/feishu/status'); } catch (e) {}
+    },
+    async fsLogout() {
+      try {
+        await this.api('POST', '/api/feishu/logout');
+        this.fsStatus = {};
+        this.toast('success', '飞书已清除');
+      } catch (e) { this.toast('error', '清除失败', e.message); }
+    },
+
+    // 钉钉
+    async validateDt() {
+      try {
+        const r = await this.api('POST', '/api/dingtalk/validate', { client_id: this.dtForm.client_id, client_secret: this.dtForm.client_secret });
+        if (r.ok) {
+          this.dtForm.client_id = '';
+          this.dtForm.client_secret = '';
+          this.toast('success', '钉钉验证成功', r.message);
+          await this.refreshDtStatus();
+          if (!this.dtStatus.user_id) {
+            this.dtWaitingUserId = true;
+            this._startDtPoll();
+          }
+        } else {
+          this.toast('error', '验证失败', r.error);
+        }
+      } catch (e) { this.toast('error', '验证失败', e.message); }
+    },
+    _startDtPoll() {
+      if (this._dtPollTimer) clearInterval(this._dtPollTimer);
+      this._dtPollTimer = setInterval(async () => {
+        await this.refreshDtStatus();
+        if (this.dtStatus.user_id) {
+          this.dtWaitingUserId = false;
+          clearInterval(this._dtPollTimer);
+          this._dtPollTimer = null;
+          this.toast('success', 'User ID 已获取', this.dtStatus.user_id);
+        }
+      }, 3000);
+      setTimeout(() => {
+        if (this._dtPollTimer) {
+          clearInterval(this._dtPollTimer);
+          this._dtPollTimer = null;
+          this.dtWaitingUserId = false;
+        }
+      }, 120000);
+    },
+    async refreshDtStatus() {
+      try { this.dtStatus = await this.api('GET', '/api/dingtalk/status'); } catch (e) {}
+    },
+    async dtLogout() {
+      try {
+        await this.api('POST', '/api/dingtalk/logout');
+        this.dtStatus = {};
+        this.toast('success', '钉钉已清除');
+      } catch (e) { this.toast('error', '清除失败', e.message); }
+    },
+
+    // === Logs ===
+    // === Interaction Mode ===
+    async loadInteraction() {
+      try {
+        const resp = await fetch('/api/interaction');
+        const data = await resp.json();
+        this.interactionEnabled = data.enabled || false;
+        this.interactionTimeout = data.timeout_seconds || 0;
+        this.interactionShowTerminal = data.show_in_terminal !== false;
+      } catch (e) { console.error('load interaction failed', e); }
+    },
+    async toggleInteraction() {
+      this.interactionEnabled = !this.interactionEnabled;
+      await this.saveInteraction();
+    },
+    async saveInteraction() {
+      try {
+        await fetch('/api/interaction', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            enabled: this.interactionEnabled,
+            timeout_seconds: this.interactionTimeout,
+            show_in_terminal: this.interactionShowTerminal,
+          }),
+        });
+      } catch (e) { console.error('save interaction failed', e); }
+    },
+
+    // === Logs ===
+    async loadLogs() {
+      try { this.logLines = (await this.api('GET', '/api/logs?lines=100')).lines || []; }
+      catch (e) { this.toast('error', '加载日志失败', e.message); }
+    },
+
+    async clearLogs() {
+      try {
+        await this.api('POST', '/api/logs/clear');
+        this.logLines = [];
+        this.toast('success', '日志已清除');
+      } catch (e) { this.toast('error', '清除失败', e.message); }
+    },
+  };
+}
+</script>
+<script>
+// 安全回退：如果 Alpine.js 加载失败，移除 x-cloak 使内容可见
+setTimeout(() => {
+  if (!window.Alpine) {
+    document.querySelectorAll('[x-cloak]').forEach(el => el.removeAttribute('x-cloak'));
+  }
+}, 3000);
+</script>
+</body>
+</html>
