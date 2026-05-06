@@ -1,4 +1,4 @@
-# Claude Code 遥控器 — 让 AI 干活，你去摸鱼
+# ClaudeBeep — 让 AI 干活，你去摸鱼
 
 [English](README_EN.md) | 中文
 
@@ -26,7 +26,7 @@
 ### 安装
 
 ```bash
-cd claude-code-notify-plus
+cd ClaudeBeep
 pip install -r requirements.txt
 ```
 
@@ -393,7 +393,7 @@ python notify.py --ui         # 启动 Web 界面
 ## 文件结构
 
 ```
-claude-code-notify-plus/
+ClaudeBeep/
 ├── notify.py                 # 主入口
 ├── interaction.py            # 交互核心模块
 ├── notify_state.py           # 跨进程状态（去重）

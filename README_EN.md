@@ -1,4 +1,4 @@
-# Claude Code Remote — Let AI Work While You Relax
+# ClaudeBeep — Let AI Work While You Relax
 
 English | [中文](README.md)
 
@@ -26,7 +26,7 @@ When Claude Code needs your input — whether it's approving file writes, choosi
 ### Install
 
 ```bash
-cd claude-code-notify-plus
+cd ClaudeBeep
 pip install -r requirements.txt
 ```
 
@@ -373,7 +373,7 @@ python notify.py --ui         # Launch Web UI
 ## File Structure
 
 ```
-claude-code-notify-plus/
+ClaudeBeep/
 ├── notify.py                 # Main entry point
 ├── interaction.py            # Interaction core module
 ├── notify_state.py           # Cross-process state (dedup)

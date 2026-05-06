@@ -1,4 +1,4 @@
-"""Flask 后端 — Claude Code 通知管理器 Web UI。"""
+"""Flask 后端 — ClaudeBeep Web UI。"""
 
 import json
 import sys
