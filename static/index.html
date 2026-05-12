@@ -397,13 +397,14 @@
         </div>
       </div>
 
-      <!-- 重要提示 -->
+      <!-- 微信 Session 说明 -->
       <div class="mb-6 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
         <div class="flex items-start gap-2">
           <span class="text-amber-400 mt-0.5">⚠</span>
           <div class="text-xs text-amber-200/90">
-            <div class="font-medium mb-1">首次使用须知</div>
-            <div>扫码登录成功后，需要在微信中找到你的 bot 并发送一条消息（如"你好"），建立会话后才能收到通知。这是 ilink Bot API 的要求。</div>
+            <div class="font-medium mb-1">微信 Session 说明</div>
+            <div>扫码登录成功后，Session 不会自动续期。如果长时间未使用（通常数天），Session 过期后发送消息会失败，需要在此页面重新扫码登录。</div>
+            <div class="mt-1">首次使用须先在微信中给 Bot 发送一条消息以建立会话。</div>
           </div>
         </div>
       </div>

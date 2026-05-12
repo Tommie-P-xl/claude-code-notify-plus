@@ -4,8 +4,6 @@ import json
 import os
 import random
 import base64
-import subprocess
-import sys
 import threading
 import urllib.request
 import urllib.error
@@ -14,8 +12,6 @@ from typing import Dict, Any
 from .base import NotificationChannel
 
 SCRIPT_DIR = Path(__file__).resolve().parent.parent
-KEEPALIVE_PID = SCRIPT_DIR / "keepalive.pid"
-KEEPALIVE_SCRIPT = SCRIPT_DIR / "weixin_keepalive.py"
 
 
 def _log(msg: str):
@@ -32,78 +28,6 @@ ILINK_BASE = "https://ilinkai.weixin.qq.com"
 
 # iLink API 常量（与 Hermes Agent 保持一致）
 CHANNEL_VERSION = "2.2.0"
-
-
-def _is_keepalive_running() -> bool:
-    """检查 keepalive 守护进程是否在运行"""
-    if not KEEPALIVE_PID.exists():
-        return False
-    try:
-        pid = int(KEEPALIVE_PID.read_text(encoding="utf-8").strip())
-        if sys.platform == "win32":
-            import ctypes
-            kernel32 = ctypes.windll.kernel32
-            handle = kernel32.OpenProcess(0x1000, False, pid)
-            if handle:
-                kernel32.CloseHandle(handle)
-                return True
-            return False
-        else:
-            os.kill(pid, 0)
-            return True
-    except (ValueError, OSError, ProcessLookupError):
-        return False
-
-
-def start_keepalive():
-    """启动 keepalive 守护进程（如果未运行）"""
-    if _is_keepalive_running():
-        return
-    if not KEEPALIVE_SCRIPT.exists():
-        _log("[weixin] keepalive 脚本不存在，跳过启动")
-        return
-    try:
-        python_exe = sys.executable
-        if sys.platform == "win32":
-            CREATE_NEW_PROCESS_GROUP = 0x00000200
-            DETACHED_PROCESS = 0x00000008
-            subprocess.Popen(
-                [python_exe, str(KEEPALIVE_SCRIPT)],
-                creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                close_fds=True,
-            )
-        else:
-            subprocess.Popen(
-                [python_exe, str(KEEPALIVE_SCRIPT)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-        _log("[weixin] keepalive 守护进程已启动")
-    except Exception as e:
-        _log(f"[weixin] 启动 keepalive 失败: {e}")
-
-
-def stop_keepalive():
-    """停止 keepalive 守护进程"""
-    if not KEEPALIVE_PID.exists():
-        return
-    try:
-        pid = int(KEEPALIVE_PID.read_text(encoding="utf-8").strip())
-        if sys.platform == "win32":
-            subprocess.run(["taskkill", "/F", "/PID", str(pid)],
-                           capture_output=True, timeout=5)
-        else:
-            os.kill(pid, signal.SIGTERM)
-        _log(f"[weixin] keepalive 守护进程已停止 (PID={pid})")
-    except Exception:
-        pass
-    try:
-        KEEPALIVE_PID.unlink(missing_ok=True)
-    except Exception:
-        pass
 
 
 # 全局登录状态（线程安全）
@@ -210,6 +134,7 @@ class WeixinChannel(NotificationChannel):
                         if ret != 0 or errcode != 0:
                             if errcode == -14 or ret == -14:
                                 return {"ok": False, "reason": "session_timeout"}
+                            # ret=-2: context_token 过期，降级为 api_error 让调用方丢弃 token 重试
                             _log(f"[weixin] API 错误 ret={ret} errcode={errcode} errmsg={result.get('errmsg', '')}")
                             return {"ok": False, "reason": "api_error"}
                     except (json.JSONDecodeError, AttributeError):
@@ -239,12 +164,7 @@ class WeixinChannel(NotificationChannel):
         # errcode=-14: bot session 过期
         # 不带 context_token 重试仍会失败，需要重新登录
         if result["reason"] == "session_timeout":
-            _log("[weixin] bot session 过期 (errcode=-14)，需要重新扫码登录")
-            # 尝试重启 keepalive 守护进程以维持后续 session
-            try:
-                start_keepalive()
-            except Exception:
-                pass
+            _log("[weixin] bot session 过期 (errcode=-14)，请在 Web UI 重新扫码登录后继续使用")
             return False
 
         # 其他错误：尝试不带 context_token 重试一次
@@ -456,9 +376,7 @@ def _qr_login_loop():
                 # 调用 getupdates 初始化 session 并获取 context_token
                 _init_session_after_login(bot_token, baseurl)
 
-                # 启动 session 保活守护进程
-                start_keepalive()
-                _log("[weixin] 登录成功，session 保活已启动")
+                _log("[weixin] 登录成功（注意：session 不自动保活，长时间不用需重新扫码）")
                 return
 
             elif status == "expired":

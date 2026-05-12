@@ -410,19 +410,6 @@ def main():
         return
 
     # --- 正常通知流程 ---
-    # 微信或 QQ 已启用时，确保 keepalive 守护进程在运行
-    wx_enabled = config.get("weixin", {}).get("enabled") and config.get("weixin", {}).get("bot_token")
-    qq_enabled = config.get("qq", {}).get("app_id")  # QQ: 有凭据就启动
-    tg_enabled = config.get("telegram", {}).get("bot_token")  # Telegram: 有 token 就启动
-    fs_enabled = config.get("feishu", {}).get("app_id") and config.get("feishu", {}).get("app_secret")  # 飞书: 有凭据就启动
-    dt_enabled = config.get("dingtalk", {}).get("client_id") and config.get("dingtalk", {}).get("client_secret")  # 钉钉: 有凭据就启动
-    if wx_enabled or qq_enabled or tg_enabled or fs_enabled or dt_enabled:
-        try:
-            from channels.weixin import start_keepalive
-            start_keepalive()
-        except Exception:
-            pass
-
     context_text = ""
     hook_type = args.type
     ctx = {}
@@ -506,7 +493,9 @@ def main():
         # 等待响应（终端 + 文件轮询竞争）
         timeout = config.get("interaction", {}).get("timeout_seconds", 0)
         show_terminal = config.get("interaction", {}).get("show_in_terminal", True)
-        response = interaction.wait_for_response(pending["id"], timeout, show_terminal)
+        response = interaction.wait_for_response(
+            pending["id"], timeout, show_terminal, config, pending
+        )
 
         # 清理：只删 pending 文件，保留 response 文件供其他渠道检测"已处理"
         try:

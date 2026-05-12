@@ -15,6 +15,17 @@ from pathlib import Path
 from typing import Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def _log(msg: str):
+    from datetime import datetime
+    log_file = SCRIPT_DIR / "notify.log"
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] [interaction] {msg}\n")
+    except Exception:
+        pass
 PENDING_DIR = SCRIPT_DIR / "pending"
 RESPONSE_DIR = SCRIPT_DIR / "responses"
 _LABEL_SEQ_FILE = PENDING_DIR / ".label_seq"
@@ -654,7 +665,7 @@ def format_terminal_prompt(pending_list: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _console_reader_thread(request_id: str, response_file: Path):
+def _console_reader_thread(request_id: str, response_file: Path, stop_event: threading.Event = None):
     """
     终端读取线程：显示提示，读取用户输入，写入 response 文件。
     如果 response 文件已存在（被其他渠道抢先），静默退出。
@@ -674,6 +685,10 @@ def _console_reader_thread(request_id: str, response_file: Path):
         if not user_input:
             return
 
+        # 如果已被其他渠道处理，不再写入
+        if stop_event and stop_event.is_set():
+            return
+
         if response_file.exists():
             return
 
@@ -691,11 +706,18 @@ def _console_reader_thread(request_id: str, response_file: Path):
 
 # ── 主等待逻辑 ──────────────────────────────────────────
 
-def wait_for_response(request_id: str, timeout: int, show_terminal: bool) -> Optional[dict]:
+def wait_for_response(
+    request_id: str,
+    timeout: int,
+    show_terminal: bool,
+    config: dict = None,
+    pending: dict = None,
+) -> Optional[dict]:
     """
     等待用户响应。
     - 主线程轮询 responses/{id}.json
     - 如果 show_terminal=True，同时启动终端读取线程
+    - 如果 config/pending 提供，启动各渠道临时监听
     - 任一来源先写入 response 文件即返回
     - timeout=0 表示无限等待
     - 超时返回 None
@@ -704,24 +726,39 @@ def wait_for_response(request_id: str, timeout: int, show_terminal: bool) -> Opt
     resp_file = RESPONSE_DIR / f"{request_id}.json"
     poll_interval = 2  # 秒
 
+    stop_event = threading.Event()
+
+    # 启动各渠道临时监听（仅当交互模式启用且配置提供时）
+    listener_threads = []
+    if config and pending:
+        try:
+            import listener
+            listener_threads = listener.start_listeners(config, request_id, pending, stop_event)
+        except Exception as e:
+            _log(f"启动临时监听失败: {e}")
+
     if show_terminal:
         t = threading.Thread(
             target=_console_reader_thread,
-            args=(request_id, resp_file),
+            args=(request_id, resp_file, stop_event),
             daemon=True,
         )
         t.start()
 
     start = time.time()
-    while True:
-        if resp_file.exists():
-            try:
-                response = json.loads(resp_file.read_text(encoding="utf-8"))
-                return response
-            except Exception:
-                pass
+    try:
+        while True:
+            if resp_file.exists():
+                try:
+                    response = json.loads(resp_file.read_text(encoding="utf-8"))
+                    return response
+                except Exception:
+                    pass
 
-        if timeout > 0 and (time.time() - start) >= timeout:
-            return None
+            if timeout > 0 and (time.time() - start) >= timeout:
+                return None
 
-        time.sleep(poll_interval)
+            time.sleep(poll_interval)
+    finally:
+        # 通知所有监听线程退出
+        stop_event.set()

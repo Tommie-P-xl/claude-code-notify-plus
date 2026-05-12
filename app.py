@@ -29,27 +29,12 @@ def _shutdown_after_all_disconnect():
         if len(_sse_connections) > 0:
             return  # 有新连接，不退出
     print(f"\n[INFO] 所有浏览器标签页已关闭，自动退出。")
-    try:
-        from channels.weixin import stop_keepalive
-        stop_keepalive()
-    except Exception:
-        pass
     import os
     os._exit(0)
 
 
 def create_app() -> Flask:
     app = Flask(__name__, static_folder=str(SCRIPT_DIR / "static"))
-
-    # 启动微信 session 保活守护进程（如果已有 token）
-    try:
-        from notify import load_config
-        from channels.weixin import start_keepalive, stop_keepalive
-        cfg = load_config()
-        if cfg.get("weixin", {}).get("bot_token"):
-            start_keepalive()
-    except Exception:
-        pass
 
     # --- 静态文件 ---
     @app.route("/")
@@ -114,16 +99,6 @@ def create_app() -> Flask:
                 cfg[channel_name] = channel_conf
         save_config(cfg)
         return jsonify({"ok": True, "message": "配置已保存"})
-
-    def _restart_keepalive():
-        """重启 keepalive 守护进程"""
-        try:
-            from channels.weixin import start_keepalive, stop_keepalive
-            stop_keepalive()
-            import time; time.sleep(1)
-            start_keepalive()
-        except Exception:
-            pass
 
     # --- 通知渠道开关 ---
     @app.route("/api/channel/<name>/toggle", methods=["POST"])
@@ -195,7 +170,6 @@ def create_app() -> Flask:
             cfg["weixin"]["baseurl"] = status.get("baseurl", "https://ilinkai.weixin.qq.com")
             cfg["weixin"]["ilink_bot_id"] = status.get("ilink_bot_id", "")
             cfg["weixin"]["ilink_user_id"] = status.get("ilink_user_id", "")
-            # 清空旧的 to_user_id，等 keepalive 从用户消息中重新获取
             cfg["weixin"]["to_user_id"] = ""
             save_config(cfg)
 
@@ -210,9 +184,8 @@ def create_app() -> Flask:
 
     @app.route("/api/weixin/logout", methods=["POST"])
     def weixin_logout():
-        from channels.weixin import WeixinChannel, stop_keepalive
+        from channels.weixin import WeixinChannel
         from notify import load_config, save_config
-        stop_keepalive()
         WeixinChannel.clear_login()
         cfg = load_config()
         cfg["weixin"]["bot_token"] = ""
@@ -245,8 +218,6 @@ def create_app() -> Flask:
             if target_id:
                 cfg["qq"]["target_id"] = target_id
             save_config(cfg)
-            # 强制重启 keepalive 守护进程（含 QQ WebSocket 监听）
-            _restart_keepalive()
         return jsonify(result)
 
     @app.route("/api/qq/status", methods=["GET"])
@@ -294,7 +265,6 @@ def create_app() -> Flask:
             cfg = load_config()
             cfg["telegram"]["bot_token"] = bot_token
             save_config(cfg)
-            _restart_keepalive()
         return jsonify(result)
 
     @app.route("/api/telegram/status", methods=["GET"])
@@ -331,7 +301,6 @@ def create_app() -> Flask:
             cfg["feishu"]["app_id"] = app_id
             cfg["feishu"]["app_secret"] = app_secret
             save_config(cfg)
-            _restart_keepalive()
         return jsonify(result)
 
     @app.route("/api/feishu/status", methods=["GET"])
@@ -369,7 +338,6 @@ def create_app() -> Flask:
             cfg["dingtalk"]["client_id"] = client_id
             cfg["dingtalk"]["client_secret"] = client_secret
             save_config(cfg)
-            _restart_keepalive()
         return jsonify(result)
 
     @app.route("/api/dingtalk/status", methods=["GET"])

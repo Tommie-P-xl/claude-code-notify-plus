@@ -77,21 +77,23 @@ Reply `1` on QQ/WeChat to approve, and the terminal continues automatically.
 │  3. Create pending request file                              │
 │  4. Send notification with options to WeChat + QQ            │
 │  5. Display options in terminal (CON/dev/tty, bypass stdout) │
-│  6. Block and wait for response file                         │
-│  7. Receive response → format as hook JSON → stdout          │
-│  8. Send confirmation feedback to the replying channel       │
+│  6. Start temporary listener threads (listener.py)           │
+│  7. Block and wait for response file                         │
+│  8. Receive response → stop listeners → format hook JSON     │
+│  9. Send confirmation feedback to the replying channel       │
 └──────────┬────────────────┬────────────────┬────────────────┘
            │                │                │
            ▼                ▼                ▼
        Terminal CON   WeChat/QQ/FS/DT/TG    Web UI
-       Keyboard input   keepalive daemon      Config management
-                        Message listening + reply handling
-           │                │
-           ▼                ▼
+       Keyboard input   Temp listeners        Config management
+           │            (start on demand)
+           ▼                │
     ┌──────────────────────────────┐
     │    responses/{id}.json       │  ← Multi-channel compete, atomic write
     └──────────────────────────────┘
 ```
+
+**Zero-daemon design:** When a hook fires, the `notify.py` process itself starts temporary listener threads for each enabled channel. All threads exit when a response is received or the timeout hits — no persistent daemon, zero idle memory footprint.
 
 ### Core Modules
 
@@ -99,7 +101,7 @@ Reply `1` on QQ/WeChat to approve, and the terminal continues automatically.
 |------|---------------|
 | `notify.py` | Main entry: hook callbacks, smart filtering, interactive branching |
 | `interaction.py` | Interaction core: request management, reply parsing, terminal I/O, file polling |
-| `weixin_keepalive.py` | WeChat session keepalive + QQ/Telegram/Feishu/DingTalk message listening |
+| `listener.py` | Temporary listeners: per-channel listener threads (Telegram/QQ/Feishu/DingTalk/WeChat), start on demand |
 | `channels/` | Notification channel implementations (Windows Toast / WeChat / QQ / Telegram / Feishu / DingTalk) |
 | `app.py` | Flask Web management backend |
 | `static/index.html` | Web UI frontend (Tailwind + Alpine.js) |
@@ -115,9 +117,9 @@ Reply `1` on QQ/WeChat to approve, and the terminal continues automatically.
 | **Feishu** | Stable | WebSocket | Via Feishu Open API, requires enterprise app |
 | **DingTalk** | Stable | Stream | Via DingTalk Open API, requires app with robot capability |
 | **Windows Toast** | Stable | Local | Native system toast notification with sound |
-| **WeChat** | Stable | Long polling | Via ilink Bot API, auto-keepalive after QR login |
+| **WeChat** | Stable | Long polling | Via ilink Bot API, session expires after inactivity, re-scan QR to restore |
 
-> **Recommend QQ or Telegram as primary remote notification channels.** WeChat works via ilink Bot API with automatic session keepalive after QR login. `context_token` expiration is handled gracefully with auto-degradation. Feishu and DingTalk use outbound-only connections, no public IP needed.
+> **Recommend QQ or Telegram as primary remote notification channels.** WeChat works via ilink Bot API. `context_token` expiration is handled gracefully with auto-degradation (retry without token). Feishu and DingTalk use outbound-only connections, no public IP needed.
 
 ### Channel Setup
 
@@ -127,7 +129,7 @@ Reply `1` on QQ/WeChat to approve, and the terminal continues automatically.
 3. After login, find your Bot in WeChat and send a message (e.g., "hello")
 4. The system auto-captures the receiver User ID (`to_user_id`), ready to use
 
-> **Note:** WeChat requires the keepalive daemon to maintain the session. If the session expires after long inactivity, re-scan the QR code to restore.
+> **Note:** WeChat session does not auto-renew. If the session expires after long inactivity (sending returns `ret=-2` or `errcode=-14`), re-scan the QR code to restore.
 
 **Telegram:**
 1. Find [@BotFather](https://t.me/BotFather) in Telegram, send `/newbot` to create a bot
@@ -340,10 +342,10 @@ python notify.py --ui         # Launch Web UI
 ## FAQ
 
 **Q: No response in terminal after QQ/WeChat/Feishu/DingTalk reply?**
-- Check if the keepalive daemon is running (look for `keepalive.pid` file)
 - Confirm `interaction.enabled` is `true`
-- Check `notify.log` for `收到消息` (message received) and `交互回复` (interaction reply) logs
-- If no `收到消息` log appears, the message didn't reach the keepalive process — check platform permissions
+- Check `notify.log` for `[listener]` entries and message received records
+- Verify channel credentials are valid (token not expired)
+- Check platform permissions (e.g., DingTalk `Robot.SingleChat.ReadWrite`, Feishu WebSocket event subscription)
 
 **Q: DingTalk/Feishu not receiving user messages?**
 - **DingTalk**: Confirm `Robot.SingleChat.ReadWrite` permission is enabled (required for single chat)
@@ -356,10 +358,10 @@ python notify.py --ui         # Launch Web UI
 - Check `notify.log` to confirm the hook is being triggered
 
 **Q: WeChat not receiving notifications?**
-- Check if the keepalive daemon is running (look for `keepalive.pid` file)
 - Confirm `to_user_id` is configured (send a message to the bot in WeChat to auto-capture)
-- If log shows `bot session expired (errcode=-14)`, re-scan QR code to log in
-- `context_token` expiration auto-degrades (sends without token), doesn't affect delivery
+- If log shows `ret=-2` (context_token expired) or `errcode=-14` (bot session expired), re-scan QR code to log in
+- `context_token` expiration auto-degrades (retries without token), doesn't affect delivery
+- Note: if the bot_token itself is expired, both retries return `ret=-2`; you must re-scan to get a new token
 
 **Q: What if labels run out?**
 - After the Claude Code session closes, leftover requests are automatically cleaned up and labels restart from A. Requests within the session can be replied to at any time
@@ -376,9 +378,9 @@ python notify.py --ui         # Launch Web UI
 ClaudeBeep/
 ├── notify.py                 # Main entry point
 ├── interaction.py            # Interaction core module
+├── listener.py               # Temporary listeners (zero-daemon core)
 ├── notify_state.py           # Cross-process state (dedup)
 ├── notify_hook.bat           # Windows launch script
-├── weixin_keepalive.py       # WeChat keepalive + channel listeners
 ├── app.py                    # Flask Web backend
 ├── config.json               # Config file (generated at runtime)
 ├── pending/                  # Pending requests (runtime, auto-cleanup)
@@ -413,18 +415,16 @@ ClaudeBeep/
 - Other API errors auto-retry once without `context_token` (graceful degradation)
 - Added detailed request logging (body + headers) for debugging
 
-**to_user_id Auto-Capture (`weixin_keepalive.py`):**
-- keepalive auto-extracts `from_user_id` as `to_user_id` from incoming messages (consistent with QQ/Telegram)
-- QR login auto-clears old `to_user_id`, waits for keepalive to capture from new messages
-- `_init_session_after_login` extracts both `context_token` and `to_user_id`
+**to_user_id Auto-Capture (`listener.py`):**
+- Temporary listeners auto-extract `from_user_id` as `to_user_id` from incoming messages (consistent with QQ/Telegram)
+- All channel listeners support automatic user ID capture
 
-**Message Processing Loop Fix (`weixin_keepalive.py`):**
-- Fixed indentation bug where user reply handling was outside the `for msg in msgs:` loop
-- Now every received message is checked and processed, not just the last one
-
-**Keepalive Startup Retry (`weixin_keepalive.py`):**
-- If config not ready on startup, retries up to 5 times (2s interval) instead of exiting immediately
-- Fixes issue where keepalive exits right after QR login due to config not yet saved
+**Zero-Daemon Refactor (`listener.py` added, `weixin_keepalive.py` removed):**
+- Removed `weixin_keepalive.py` persistent daemon; replaced with on-demand temporary listeners
+- New `listener.py`: temporary listener threads for all 5 channels (Telegram long-poll, QQ/Feishu WebSocket, DingTalk Stream, WeChat getupdates)
+- `interaction.py` integrates `listener.start_listeners()`; all threads exit on response or timeout
+- `app.py` removes all keepalive-related calls
+- Zero idle memory footprint — no persistent Python process
 
 **Web UI Improvements (`static/index.html`):**
 - Auto-shows "waiting for receiver User ID" reminder after QR login (matching DingTalk/Feishu pattern)
@@ -455,12 +455,11 @@ ClaudeBeep/
 - Web UI configuration steps updated in sync
 - Fixed `requirements.txt` `dingtalk-stream` version (`>=1.0.0` → `>=0.24.0`)
 
-**Connection Stability Improvements (`weixin_keepalive.py`):**
-- **Multi-instance protection**: Auto-detect and kill stale keepalive processes on startup to prevent connection conflicts
-- **Message deduplication**: New `MessageDedup` class (5-minute TTL) prevents duplicate message processing after SDK reconnects and replays old messages
+**Connection Stability Improvements (`listener.py`):**
+- **Zero-daemon**: No persistent process; temporary listener threads start on hook trigger and exit cleanly
 - **DingTalk heartbeat optimization**: Subclass `DingTalkStreamClient` to reduce ping interval from 60s (default) to 10s for faster disconnect detection
-- **Feishu reconnect optimization**: Watchdog timeout reduced from 5 minutes to 2 minutes, reconnect delay from 5s to 2s
-- **Enhanced logging**: Full message chain logging (connection established → message received → parsed → matched → response written), connection state changes marked with emoji indicators
+- **Feishu watchdog**: Forces connection close via private attribute `_Client__ws_client` when the stop event is set
+- **Enhanced logging**: Full message chain logging (connection established → message received → parsed → matched → response written)
 
 ---
 

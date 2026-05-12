@@ -77,15 +77,15 @@ Claude Code 工作时，审批通知会同时发到终端和手机：
 │  3. 创建 pending 请求文件                                     │
 │  4. 发送带选项的通知到微信 + QQ                               │
 │  5. 终端显示选项（CON/dev/tty，绕过 stdout）                  │
-│  6. 阻塞等待响应文件                                          │
-│  7. 收到响应 → 格式化为 hook JSON → stdout 输出给 Claude Code │
-│  8. 向回复渠道发送确认反馈                                    │
+│  6. 启动临时监听线程（listener.py）                            │
+│  7. 阻塞等待响应文件                                          │
+│  8. 收到响应 → 停止监听 → 格式化为 hook JSON → stdout         │
+│  9. 向回复渠道发送确认反馈                                    │
 └──────────┬────────────────┬────────────────┬────────────────┘
            │                │                │
            ▼                ▼                ▼
        终端 CON       微信/QQ/飞书/钉钉/TG     Web UI
-       键盘输入         keepalive 守护进程       配置管理
-           │           消息监听 + 回复处理
+       键盘输入        临时监听线程（按需启动）   配置管理
            │                │
            ▼                ▼
     ┌──────────────────────────────┐
@@ -93,14 +93,16 @@ Claude Code 工作时，审批通知会同时发到终端和手机：
     └──────────────────────────────┘
 ```
 
+**零守护进程设计：** hook 触发时，`notify.py` 进程自身启动各渠道的临时监听线程；收到回复或超时后，所有线程随进程退出，内存占用归零。
+
 ### 核心模块
 
 | 文件 | 职责 |
 |------|------|
 | `notify.py` | 主入口：hook 回调、智能过滤、交互分支 |
 | `interaction.py` | 交互核心：请求管理、回复解析、终端 I/O、文件轮询 |
-| `weixin_keepalive.py` | 微信 session 保活 + QQ WebSocket 监听 + 消息回复处理 |
-| `channels/` | 通知渠道实现（Windows Toast / 微信 / QQ） |
+| `listener.py` | 临时监听器：各渠道临时监听线程（Telegram/QQ/飞书/钉钉/微信），用完即走 |
+| `channels/` | 通知渠道实现（Windows Toast / 微信 / QQ / Telegram / 飞书 / 钉钉） |
 | `app.py` | Flask Web 管理界面后端 |
 | `static/index.html` | Web UI 前端（Tailwind + Alpine.js） |
 
@@ -135,9 +137,9 @@ hook 触发 → 解析上下文 → 提取选项 → 创建 pending 文件
 | **飞书** | 稳定 | WebSocket | 通过飞书 Open API 发送，需创建企业自建应用 |
 | **钉钉** | 稳定 | Stream | 通过钉钉 Open API 发送，需创建应用并添加机器人 |
 | **Windows Toast** | 稳定 | 本地 | 系统原生弹窗通知，带提示音 |
-| **微信** | 稳定 | 长轮询 | 通过 ilink Bot API 发送，扫码登录后自动保活 |
+| **微信** | 稳定 | 长轮询 | 通过 ilink Bot API 发送，扫码登录后使用，session 过期需重新扫码 |
 
-> **推荐 QQ 或 Telegram 作为主要远程通知渠道。** 微信通过 ilink Bot API 工作，扫码登录后 keepalive 守护进程自动维持 session，`context_token` 过期时自动降级发送。飞书和钉钉均使用出站长连接，无需公网 IP。
+> **推荐 QQ 或 Telegram 作为主要远程通知渠道。** 微信通过 ilink Bot API 工作，`context_token` 过期时自动降级发送（不带 token 重试）。飞书和钉钉均使用出站长连接，无需公网 IP。
 
 ### 渠道配置说明
 
@@ -147,7 +149,7 @@ hook 触发 → 解析上下文 → 提取选项 → 创建 pending 文件
 3. 登录成功后，在微信中找到你的 Bot 并发送一条消息（如"你好"）
 4. 系统自动捕获接收用户 ID（`to_user_id`），即可开始使用
 
-> **注意：** 微信需要通过 keepalive 守护进程维持 session。如果长时间未使用导致 session 过期，重新扫码登录即可恢复。
+> **注意：** 微信 Session 不会自动续期。如果长时间未使用导致 session 过期（发送时返回 `ret=-2` 或 `errcode=-14`），重新扫码登录即可恢复。
 
 **Telegram：**
 1. 在 Telegram 中找 [@BotFather](https://t.me/BotFather)，发送 `/newbot` 创建 Bot
@@ -360,10 +362,10 @@ python notify.py --ui         # 启动 Web 界面
 ## 常见问题
 
 **Q: QQ/微信/飞书/钉钉回复后终端没反应？**
-- 检查 keepalive 守护进程是否在运行（`keepalive.pid` 文件）
 - 确认 `interaction.enabled` 为 `true`
-- 查看 `notify.log` 中是否有 `收到消息` 和 `交互回复` 日志
-- 如果日志中没有 `收到消息`，说明消息未到达 keepalive 进程，检查平台权限配置
+- 查看 `notify.log` 中是否有 `[listener]` 相关日志及 `收到消息` 记录
+- 检查对应渠道的凭据是否有效（token 是否过期）
+- 确认平台权限配置正确（如钉钉 `Robot.SingleChat.ReadWrite`、飞书 WebSocket 事件订阅等）
 
 **Q: 钉钉/飞书收不到用户消息？**
 - **钉钉**：确认已开启 `Robot.SingleChat.ReadWrite` 权限（单聊必须）
@@ -376,10 +378,10 @@ python notify.py --ui         # 启动 Web 界面
 - 查看 `notify.log` 确认 hook 是否被触发
 
 **Q: 微信收不到通知？**
-- 检查 keepalive 守护进程是否在运行（`keepalive.pid` 文件）
 - 确认已配置 `to_user_id`（需要先在微信中给 bot 发一条消息自动获取）
-- 如果日志显示 `bot session 过期 (errcode=-14)`，需重新扫码登录
-- `context_token` 过期会自动降级（不带 token 发送），不影响消息投递
+- 如果日志显示 `ret=-2`（context_token 过期）或 `errcode=-14`（bot session 过期），需重新扫码登录
+- `context_token` 过期会自动降级（不带 token 重试），不影响消息投递
+- 注意：bot_token 本身过期时两次重试均返回 `ret=-2`，必须重新扫码获取新 token
 
 **Q: 标签用完了怎么办？**
 - Claude Code 会话关闭后，残留请求会自动清理，标签从 A 重新开始。会话内的请求随时可以回复，不受时间限制
@@ -396,9 +398,9 @@ python notify.py --ui         # 启动 Web 界面
 ClaudeBeep/
 ├── notify.py                 # 主入口
 ├── interaction.py            # 交互核心模块
+├── listener.py               # 临时监听器（零守护进程核心）
 ├── notify_state.py           # 跨进程状态（去重）
 ├── notify_hook.bat           # Windows 启动脚本
-├── weixin_keepalive.py       # 微信保活 + QQ 监听 + 消息处理
 ├── app.py                    # Flask Web 后端
 ├── config.json               # 配置文件（运行时生成）
 ├── pending/                  # 待响应请求（运行时，自动清理）
@@ -433,18 +435,16 @@ ClaudeBeep/
 - 其他 API 错误时自动不带 `context_token` 重试一次（优雅降级）
 - 发送请求添加详细日志（请求体 + 请求头），便于排查
 
-**to_user_id 自动获取（`weixin_keepalive.py`）：**
-- keepalive 收到用户消息时自动提取 `from_user_id` 作为 `to_user_id`（与 QQ/Telegram 行为一致）
-- 扫码登录后自动清空旧的 `to_user_id`，等待 keepalive 从新消息中重新获取
-- `_init_session_after_login` 同时提取 `context_token` 和 `to_user_id`
+**to_user_id 自动获取（`listener.py`）：**
+- 临时监听器收到用户消息时自动提取 `from_user_id` 作为 `to_user_id`（与 QQ/Telegram 行为一致）
+- 各渠道监听器均支持自动捕获用户 ID
 
-**消息处理循环修复（`weixin_keepalive.py`）：**
-- 修复用户回复处理代码在 `for msg in msgs:` 循环外的缩进 bug
-- 现在每条收到的消息都会被检查和处理，而非只处理最后一条
-
-**keepalive 启动重试（`weixin_keepalive.py`）：**
-- 启动时如果配置未就绪，等待重试（最多 5 次，每次 2 秒）而非直接退出
-- 解决扫码登录后 keepalive 因 config 未保存完成而立即退出的问题
+**零守护进程重构（`listener.py` 新增，`weixin_keepalive.py` 删除）：**
+- 移除 `weixin_keepalive.py` 常驻守护进程，改为 hook 触发期间临时监听
+- 新增 `listener.py`：5 个渠道的临时监听线程（Telegram 长轮询、QQ/飞书 WebSocket、钉钉 Stream、微信 getupdates）
+- `interaction.py` 集成 `listener.start_listeners()`，收到回复或超时后所有线程退出
+- `app.py` 移除所有 keepalive 相关调用
+- 空闲时内存占用归零，不再有常驻 Python 进程
 
 **Web UI 改进（`static/index.html`）：**
 - 扫码登录成功后自动显示"等待获取接收用户 ID"提醒框（参照钉钉/飞书）
@@ -475,12 +475,11 @@ ClaudeBeep/
 - Web UI 配置步骤同步更新
 - 修正 `requirements.txt` 中 `dingtalk-stream` 版本号（`>=1.0.0` → `>=0.24.0`）
 
-**连接稳定性改进（`weixin_keepalive.py`）：**
-- **多实例保护**：启动时自动检测并终止旧的 keepalive 进程，避免多实例争抢连接
-- **消息去重**：新增 `MessageDedup` 类（5 分钟 TTL），防止重连后 SDK 重放旧消息导致重复处理
+**连接稳定性改进（`listener.py`）：**
+- **零守护进程**：无常驻进程，hook 触发时启动临时监听线程，退出时自动清理
 - **钉钉心跳优化**：子类化 `DingTalkStreamClient`，心跳间隔从默认 60 秒缩短到 10 秒，更快检测连接断开
-- **飞书重连优化**：看门狗超时从 5 分钟缩短到 2 分钟，重连延迟从 5 秒降到 2 秒
-- **日志增强**：全链路日志（连接建立 → 收到消息 → 解析 → 匹配 → 写入 response），连接状态变化有 emoji 标记
+- **飞书看门狗**：通过私有属性 `_Client__ws_client` 实现连接断开后的强制关闭
+- **日志增强**：全链路日志（连接建立 → 收到消息 → 解析 → 匹配 → 写入 response）
 
 ---
 
