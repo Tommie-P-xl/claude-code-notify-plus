@@ -512,17 +512,9 @@ def main():
             log(f"交互响应: channel={response.get('channel','?')} reply={response['reply']!r} → parsed={reply_text!r} → stdout={hook_output!r}")
             print(hook_output, flush=True)
 
-            # 向回复渠道发送确认反馈
-            resp_channel = response.get("channel", "")
-            if resp_channel:
-                feedback_msg = f"已收到回复: {response['reply']}"
-                for ch in channels:
-                    if ch.is_enabled() and ch.name == resp_channel:
-                        ok = ch.send("Claude Code - 回复确认", feedback_msg)
-                        log(f"[{ch.name}] 发送反馈: {feedback_msg} ({'成功' if ok else '失败'})")
-                        break
-
             # 向其他远程渠道主动推送"已处理"通知
+            # 注意：回复渠道的确认反馈已由 listener.py 的 _send_confirmation 处理，此处不再重复发送
+            resp_channel = response.get("channel", "")
             _REMOTE_CHANNEL_NAMES = {"weixin", "qq", "telegram", "feishu", "dingtalk"}
             label = pending.get("label", "?")
             context_brief = pending.get("context_text", "")[:40]
