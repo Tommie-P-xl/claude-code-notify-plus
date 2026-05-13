@@ -6,6 +6,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import ssl  # 提前导入，避免 PyInstaller --onefile 下 urllib 运行时从 base_library.zip 加载失败
 import subprocess
 import sys
 import tempfile
