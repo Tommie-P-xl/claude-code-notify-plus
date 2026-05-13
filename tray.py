@@ -276,6 +276,7 @@ def _toggle_startup(icon: Any = None) -> None:
     app_cfg["auto_start"] = new_state
     _save_config(cfg)
     run_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+    approved_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_path, 0, winreg.KEY_SET_VALUE) as key:
         if not new_state:
             try:
@@ -284,8 +285,17 @@ def _toggle_startup(icon: Any = None) -> None:
                 pass
         else:
             raw = sys.executable if getattr(sys, "frozen", False) else str(SCRIPT_DIR / "ClaudeBeep.exe")
-            target = os.path.normpath(raw)  # 去除 \\?\ 前缀并规范化路径
+            target = os.path.normpath(raw)
             winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, f'"{target}"')
+    # 同步 Windows 启动管理器状态，使其在 设置 → 应用 → 启动 中显示为已启用
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, approved_path, 0, winreg.KEY_SET_VALUE) as key:
+            if new_state:
+                winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_BINARY, b'\x02' + b'\x00' * 11)
+            else:
+                winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_BINARY, b'\x01' + b'\x00' * 11)
+    except OSError:
+        pass
     if icon:
         icon.update_menu()
 
