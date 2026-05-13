@@ -2,7 +2,7 @@
 
 ClaudeBeep 是一个 Windows 系统托盘应用，为 [Claude Code](https://claude.ai/code) 提供多渠道通知和交互式审批回复。它将原有的 Python hook 工作流打包为单个可安装桌面应用 —— 一次安装，所有操作从系统托盘管理，仅在需要详细配置时打开 Web UI。
 
-**版本：** `1.0.0`
+**版本：** `1.0.1`
 
 ## 功能
 

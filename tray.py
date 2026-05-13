@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "ClaudeBeep"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 SCRIPT_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", SCRIPT_DIR))
 CONFIG_FILE = SCRIPT_DIR / "config.json"
@@ -254,6 +254,9 @@ def _creationflags() -> int:
 def _is_startup_enabled() -> bool:
     if sys.platform != "win32":
         return False
+    cfg = _load_config()
+    if not cfg.get("app", {}).get("auto_start", False):
+        return False
     try:
         import winreg
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
@@ -267,15 +270,21 @@ def _toggle_startup(icon: Any = None) -> None:
     if sys.platform != "win32":
         return
     import winreg
+    cfg = _load_config()
+    app_cfg = cfg.setdefault("app", {})
+    new_state = not _is_startup_enabled()
+    app_cfg["auto_start"] = new_state
+    _save_config(cfg)
     run_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_path, 0, winreg.KEY_SET_VALUE) as key:
-        if _is_startup_enabled():
+        if not new_state:
             try:
                 winreg.DeleteValue(key, APP_NAME)
             except OSError:
                 pass
         else:
-            target = Path(sys.executable).resolve() if getattr(sys, "frozen", False) else SCRIPT_DIR / "ClaudeBeep.exe"
+            raw = sys.executable if getattr(sys, "frozen", False) else str(SCRIPT_DIR / "ClaudeBeep.exe")
+            target = os.path.normpath(raw)  # 去除 \\?\ 前缀并规范化路径
             winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, f'"{target}"')
     if icon:
         icon.update_menu()

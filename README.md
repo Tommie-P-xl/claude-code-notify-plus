@@ -2,7 +2,7 @@
 
 ClaudeBeep is a Windows system tray application that brings multi-channel notifications and interactive approval replies to [Claude Code](https://claude.ai/code). It packages the original Python hook workflow as a single installable desktop application — install once, manage everything from the system tray, and open the full Web UI only when detailed configuration is needed.
 
-**Version:** `1.0.0`
+**Version:** `1.0.1`
 
 ## Features
 

@@ -31,7 +31,8 @@ CONFIG_FILE = SCRIPT_DIR / "config.json"
 
 DEFAULT_CONFIG = {
     "app": {
-        "version": "1.0.0",
+        "version": "1.0.1",
+        "auto_start": False,
         "auto_cleanup": True,
         "cleanup_interval_hours": 12,
         "update_repo": "Tommie-P-xl/ClaudeBeep",

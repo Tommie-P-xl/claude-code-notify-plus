@@ -1,0 +1,52 @@
+{
+  "app": {
+    "version": "1.0.1",
+    "auto_start": false,
+    "auto_cleanup": true,
+    "cleanup_interval_hours": 12,
+    "update_repo": "Tommie-P-xl/ClaudeBeep"
+  },
+  "windows_toast": {
+    "enabled": true,
+    "duration_ms": 5000
+  },
+  "weixin": {
+    "enabled": false,
+    "bot_token": "",
+    "baseurl": "https://ilinkai.weixin.qq.com",
+    "ilink_bot_id": "",
+    "ilink_user_id": "",
+    "to_user_id": "",
+    "context_token": "",
+    "sync_buf": "",
+    "session_expired": false
+  },
+  "qq": {
+    "enabled": false,
+    "app_id": "",
+    "app_secret": "",
+    "target_id": ""
+  },
+  "telegram": {
+    "enabled": false,
+    "bot_token": "",
+    "chat_id": ""
+  },
+  "feishu": {
+    "enabled": false,
+    "app_id": "",
+    "app_secret": "",
+    "receive_id": ""
+  },
+  "dingtalk": {
+    "enabled": false,
+    "client_id": "",
+    "client_secret": "",
+    "user_id": ""
+  },
+  "interaction": {
+    "enabled": true,
+    "timeout_seconds": 0,
+    "show_in_terminal": true
+  }
+}
