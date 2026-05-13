@@ -1,11 +1,13 @@
 """钉钉通知渠道。通过钉钉 Open API 发送消息，Stream 长连接接收回复。"""
 
 import json
+import sys
 import time
 import urllib.request
 import urllib.error
 from typing import Dict, Any, Optional
 from .base import NotificationChannel
+from .text import sanitize_text
 
 DINGTALK_TOKEN_URL = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
 DINGTALK_MSG_URL = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
@@ -14,7 +16,8 @@ DINGTALK_MSG_URL = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
 def _log(msg: str):
     from pathlib import Path
     from datetime import datetime
-    log_file = Path(__file__).resolve().parent.parent / "notify.log"
+    base_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
+    log_file = base_dir / "notify.log"
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         with open(log_file, "a", encoding="utf-8") as f:
@@ -82,7 +85,7 @@ class DingTalkChannel(NotificationChannel):
             _log("[dingtalk] client_id 或 user_id 为空")
             return False
 
-        full_text = f"【{title}】\n{message}"
+        full_text = sanitize_text(f"【{title}】\n{message}")
         body = json.dumps({
             "robotCode": client_id,
             "userIds": [user_id],

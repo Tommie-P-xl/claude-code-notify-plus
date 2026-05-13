@@ -1,15 +1,23 @@
 __pycache__/
 *.pyc
 *.pyo
+*.spec
 keepalive.pid
 notify.log
 notify_state.json
+tray_heartbeat.json
 config.json
 .omc/
 .claude/
 docs/
+build/
+dist/
+Output/
+*.exe
+*.msi
+*.zip
 
 # 交互功能运行时文件
 pending/
 responses/
-new/
+*.tmp

@@ -1,10 +1,12 @@
 """飞书通知渠道。通过飞书 Open API 发送消息，WebSocket 长连接接收回复。"""
 
 import json
+import sys
 import urllib.request
 import urllib.error
 from typing import Dict, Any, Optional
 from .base import NotificationChannel
+from .text import sanitize_text
 
 FEISHU_TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
 FEISHU_MSG_URL = "https://open.feishu.cn/open-apis/im/v1/messages"
@@ -13,7 +15,8 @@ FEISHU_MSG_URL = "https://open.feishu.cn/open-apis/im/v1/messages"
 def _log(msg: str):
     from pathlib import Path
     from datetime import datetime
-    log_file = Path(__file__).resolve().parent.parent / "notify.log"
+    base_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
+    log_file = base_dir / "notify.log"
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         with open(log_file, "a", encoding="utf-8") as f:
@@ -84,7 +87,7 @@ class FeishuChannel(NotificationChannel):
             _log("[feishu] receive_id 为空")
             return False
 
-        full_text = f"【{title}】\n{message}"
+        full_text = sanitize_text(f"【{title}】\n{message}")
         body = json.dumps({
             "receive_id": receive_id,
             "msg_type": "text",

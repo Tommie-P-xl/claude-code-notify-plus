@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 
 
 def _log(msg: str):

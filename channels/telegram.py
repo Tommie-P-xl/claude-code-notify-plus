@@ -1,11 +1,13 @@
 """Telegram Bot 通知渠道。通过 Telegram Bot API 发送消息，长轮询接收回复。"""
 
 import json
+import sys
 import time
 import urllib.request
 import urllib.error
 from typing import Dict, Any, Optional
 from .base import NotificationChannel
+from .text import sanitize_text
 
 BOT_API_BASE = "https://api.telegram.org"
 
@@ -13,7 +15,8 @@ BOT_API_BASE = "https://api.telegram.org"
 def _log(msg: str):
     from pathlib import Path
     from datetime import datetime
-    log_file = Path(__file__).resolve().parent.parent / "notify.log"
+    base_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
+    log_file = base_dir / "notify.log"
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         with open(log_file, "a", encoding="utf-8") as f:
@@ -43,7 +46,7 @@ class TelegramChannel(NotificationChannel):
             _log("[telegram] bot_token 或 chat_id 为空")
             return False
 
-        full_text = f"【{title}】\n{message}"
+        full_text = sanitize_text(f"【{title}】\n{message}")
         url = f"{BOT_API_BASE}/bot{bot_token}/sendMessage"
         body = json.dumps({
             "chat_id": chat_id,

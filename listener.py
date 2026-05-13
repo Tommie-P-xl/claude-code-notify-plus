@@ -14,7 +14,7 @@ import base64
 from pathlib import Path
 from typing import Optional
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 
 # ── 日志 ──────────────────────────────────────────────────
 
@@ -262,7 +262,7 @@ def start_listeners(config: dict, request_id: str, pending: dict, stop_event: th
         )
         threads.append(t)
 
-    if config.get("weixin", {}).get("enabled") and config.get("weixin", {}).get("bot_token"):
+    if config.get("weixin", {}).get("enabled") and config.get("weixin", {}).get("bot_token") and not _tray_is_managing_weixin():
         t = threading.Thread(
             target=_weixin_listener,
             args=(config, request_id, pending, stop_event),
@@ -278,6 +278,18 @@ def start_listeners(config: dict, request_id: str, pending: dict, stop_event: th
         _log(f"启动 {len(threads)} 个临时监听线程: {', '.join(t.name for t in threads)}")
 
     return threads
+
+
+def _tray_is_managing_weixin() -> bool:
+    """托盘进程活跃时，微信长轮询由托盘统一持有，hook 进程不再重复轮询。"""
+    try:
+        heartbeat = SCRIPT_DIR / "tray_heartbeat.json"
+        if not heartbeat.exists():
+            return False
+        data = json.loads(heartbeat.read_text(encoding="utf-8"))
+        return time.time() - float(data.get("ts", 0)) < 90 and data.get("weixin_keepalive") is True
+    except Exception:
+        return False
 
 
 # ── Telegram 临时监听 ─────────────────────────────────────

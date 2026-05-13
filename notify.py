@@ -19,7 +19,7 @@ import json
 import argparse
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from channels.windows_toast import WindowsToastChannel
@@ -28,10 +28,17 @@ from channels.qq import QQBotChannel
 from channels.telegram import TelegramChannel
 from channels.feishu import FeishuChannel
 from channels.dingtalk import DingTalkChannel
+from channels.text import sanitize_data, sanitize_text
 
 CONFIG_FILE = SCRIPT_DIR / "config.json"
 
 DEFAULT_CONFIG = {
+    "app": {
+        "version": "1.0.0",
+        "auto_cleanup": True,
+        "cleanup_interval_hours": 12,
+        "update_repo": "Tommie-P-xl/ClaudeBeep",
+    },
     "windows_toast": {
         "enabled": True,
         "duration_ms": 5000,
@@ -44,6 +51,8 @@ DEFAULT_CONFIG = {
         "ilink_user_id": "",
         "to_user_id": "",
         "context_token": "",
+        "sync_buf": "",
+        "session_expired": False,
     },
     "qq": {
         "enabled": False,
@@ -68,6 +77,11 @@ DEFAULT_CONFIG = {
         "client_secret": "",
         "user_id": "",
     },
+    "interaction": {
+        "enabled": True,
+        "timeout_seconds": 0,
+        "show_in_terminal": True,
+    },
 }
 
 CLAUDECODE_SETTINGS = Path.home() / ".claude" / "settings.json"
@@ -86,6 +100,8 @@ NOTIFY_HOOK_EVENTS = [
 
 def _hook_bat_path() -> str:
     """返回 notify_hook.bat 的路径（Windows）或 notify.py 的路径（其他平台）"""
+    if getattr(sys, "frozen", False):
+        return str(Path(sys.executable).resolve())
     bat = SCRIPT_DIR / "notify_hook.bat"
     if sys.platform == "win32" and bat.exists():
         return str(bat).replace("/", "\\")
@@ -121,6 +137,7 @@ def log(msg: str) -> None:
     """记录日志到文件"""
     from datetime import datetime
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    msg = sanitize_text(msg)
     try:
         lines = []
         if LOG_FILE.exists():
@@ -180,7 +197,7 @@ def _clean_notify_hooks(hooks: dict, event: str) -> int:
     removed = 0
     for entry in entries:
         cmds = _extract_commands(entry)
-        if any("notify" in c.lower() for c in cmds):
+        if any(("notify" in c.lower() or "claudebeep" in c.lower()) for c in cmds):
             removed += 1
             continue
         new_entries.append(entry)
@@ -309,6 +326,15 @@ def test_channels(config: dict) -> None:
         print("没有启用任何通知渠道。")
 
 
+def _read_stdin_utf8() -> str:
+    """Read hook JSON as UTF-8 bytes to avoid Windows codepage mojibake."""
+    try:
+        data = sys.stdin.buffer.read()
+        return data.decode("utf-8", errors="replace")
+    except Exception:
+        return sys.stdin.read()
+
+
 def _is_interaction_enabled(config: dict) -> bool:
     """检查交互功能是否启用（避免在 main 中直接 import interaction）"""
     return config.get("interaction", {}).get("enabled", False) is True
@@ -418,9 +444,9 @@ def main():
     if args.from_stdin:
         try:
             if not sys.stdin.isatty():
-                raw = sys.stdin.read()
+                raw = _read_stdin_utf8()
                 if raw.strip():
-                    ctx = json.loads(raw)
+                    ctx = sanitize_data(json.loads(raw))
                     log(f"hook ctx keys={list(ctx.keys())} tool={ctx.get('tool_name','?')} event={ctx.get('hook_event_name', ctx.get('hookEvent', '?'))} auto_approved={ctx.get('auto_approved', 'NOT_PRESENT')}")
                     # 调试：记录完整上下文（排除大字段）
                     debug_ctx = {k: v for k, v in ctx.items() if k not in ('transcript_path',)}
@@ -449,7 +475,7 @@ def main():
         except (json.JSONDecodeError, IOError):
             pass
 
-    final_message = args.message or context_text
+    final_message = sanitize_text(args.message or context_text)
 
     if hook_type == "ask":
         title = "Claude Code - 询问"
@@ -458,7 +484,7 @@ def main():
         title = "Claude Code - 完成"
         default_msg = "Claude 已执行完毕，请查看结果。"
 
-    message = final_message if final_message else default_msg
+    message = sanitize_text(final_message if final_message else default_msg)
 
     channels = collect_channels(config)
 
@@ -483,7 +509,7 @@ def main():
         )
 
         # 发送带选项的通知
-        interactive_message = interaction.format_notification_message(pending)
+        interactive_message = sanitize_text(interaction.format_notification_message(pending))
         for ch in channels:
             if ch.is_enabled():
                 log(f"[{ch.name}] 发送交互通知: {interactive_message[:80]}")
@@ -517,13 +543,9 @@ def main():
             resp_channel = response.get("channel", "")
             _REMOTE_CHANNEL_NAMES = {"weixin", "qq", "telegram", "feishu", "dingtalk"}
             label = pending.get("label", "?")
-            context_brief = pending.get("context_text", "")[:40]
             # resp_channel 为空时说明是终端回复
             handled_by = resp_channel if resp_channel else "终端"
-            done_msg = (
-                f"#{label} 已由【{handled_by}】处理，无需再次回复\n"
-                f"内容: {context_brief}"
-            )
+            done_msg = f"#{label} 已由【{handled_by}】处理，无需再次回复"
             for ch in channels:
                 if (ch.is_enabled()
                         and ch.name in _REMOTE_CHANNEL_NAMES

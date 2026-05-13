@@ -9,7 +9,8 @@ import uuid
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, Response
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", SCRIPT_DIR))
 CONFIG_FILE = SCRIPT_DIR / "config.json"
 LOG_FILE = SCRIPT_DIR / "notify.log"
 CLAUDECODE_SETTINGS = Path.home() / ".claude" / "settings.json"
@@ -34,7 +35,7 @@ def _shutdown_after_all_disconnect():
 
 
 def create_app() -> Flask:
-    app = Flask(__name__, static_folder=str(SCRIPT_DIR / "static"))
+    app = Flask(__name__, static_folder=str(RESOURCE_DIR / "static"))
 
     # --- 静态文件 ---
     @app.route("/")
@@ -170,7 +171,8 @@ def create_app() -> Flask:
             cfg["weixin"]["baseurl"] = status.get("baseurl", "https://ilinkai.weixin.qq.com")
             cfg["weixin"]["ilink_bot_id"] = status.get("ilink_bot_id", "")
             cfg["weixin"]["ilink_user_id"] = status.get("ilink_user_id", "")
-            cfg["weixin"]["to_user_id"] = ""
+            cfg["weixin"].setdefault("to_user_id", "")
+            cfg["weixin"]["session_expired"] = False
             save_config(cfg)
 
         return jsonify(status)
@@ -373,7 +375,7 @@ def create_app() -> Flask:
                     has_notify = False
                     for entry in entries:
                         cmds = _extract_commands(entry)
-                        if any("notify" in c.lower() for c in cmds):
+                        if any(("notify" in c.lower() or "claudebeep" in c.lower()) for c in cmds):
                             has_notify = True
                             break
                     hooks_info["events"][event] = has_notify
@@ -450,7 +452,7 @@ def create_app() -> Flask:
         if request.method == "GET":
             cfg = load_config()
             interaction = cfg.get("interaction", {
-                "enabled": False,
+                "enabled": True,
                 "timeout_seconds": 0,
                 "show_in_terminal": True,
             })
@@ -530,7 +532,7 @@ def _check_hooks_installed() -> bool:
         for event in NOTIFY_HOOK_EVENTS:
             for entry in hooks.get(event, []):
                 cmds = _extract_commands(entry)
-                if any("notify" in c.lower() for c in cmds):
+                if any(("notify" in c.lower() or "claudebeep" in c.lower()) for c in cmds):
                     return True
     except Exception:
         pass

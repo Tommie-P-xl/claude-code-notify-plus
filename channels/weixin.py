@@ -2,16 +2,19 @@
 
 import json
 import os
+import sys
 import random
 import base64
 import threading
+import time
 import urllib.request
 import urllib.error
 from pathlib import Path
 from typing import Dict, Any
 from .base import NotificationChannel
+from .text import sanitize_text
 
-SCRIPT_DIR = Path(__file__).resolve().parent.parent
+SCRIPT_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
 
 
 def _log(msg: str):
@@ -44,6 +47,15 @@ _login_state = {
 _login_lock = threading.Lock()
 _login_thread = None
 
+_keepalive_lock = threading.Lock()
+_keepalive_thread = None
+_keepalive_stop = threading.Event()
+_keepalive_status = {
+    "running": False,
+    "last_ok": 0.0,
+    "last_error": "",
+}
+
 
 class WeixinChannel(NotificationChannel):
     """通过 ilink Bot API 向微信发送消息"""
@@ -73,7 +85,7 @@ class WeixinChannel(NotificationChannel):
             _log("[weixin] send 跳过: to_user_id 为空，请先在微信上给 bot 发一条消息以自动获取")
             return False
 
-        full_text = f"【{title}】\n{message}"
+        full_text = sanitize_text(f"【{title}】\n{message}")
 
         import time as _time
         client_id = f"claude-notify:{int(_time.time()*1000)}-{random.randbytes(4).hex()}"
@@ -134,8 +146,9 @@ class WeixinChannel(NotificationChannel):
                         if ret != 0 or errcode != 0:
                             if errcode == -14 or ret == -14:
                                 return {"ok": False, "reason": "session_timeout"}
-                            # ret=-2: context_token 过期，降级为 api_error 让调用方丢弃 token 重试
                             _log(f"[weixin] API 错误 ret={ret} errcode={errcode} errmsg={result.get('errmsg', '')}")
+                            if _is_stale_context_error(ret, errcode, result.get("errmsg", "")):
+                                return {"ok": False, "reason": "stale_context"}
                             return {"ok": False, "reason": "api_error"}
                     except (json.JSONDecodeError, AttributeError):
                         pass
@@ -165,11 +178,16 @@ class WeixinChannel(NotificationChannel):
         # 不带 context_token 重试仍会失败，需要重新登录
         if result["reason"] == "session_timeout":
             _log("[weixin] bot session 过期 (errcode=-14)，请在 Web UI 重新扫码登录后继续使用")
+            _mark_session_timeout()
             return False
 
-        # 其他错误：尝试不带 context_token 重试一次
+        # context_token 过期或其他可恢复错误：剥离 context_token 降级重试一次
         if context_token:
-            _log("[weixin] 发送失败，尝试不带 context_token 重试")
+            if result["reason"] == "stale_context":
+                _log("[weixin] context_token 已过期，清空本地 token 并执行 tokenless fallback")
+                _update_config_field("context_token", "")
+            else:
+                _log("[weixin] 发送失败，尝试不带 context_token 重试")
             body = _build_body(with_ctx=False)
             _log(f"[weixin] 重试请求体: {body.decode('utf-8', errors='replace')[:500]}")
             result = _do_send(body)
@@ -226,7 +244,62 @@ class WeixinChannel(NotificationChannel):
     @staticmethod
     def clear_login() -> Dict[str, Any]:
         """清除微信登录信息"""
+        stop_keepalive()
         return {"ok": True, "message": "微信登录信息已清除"}
+
+
+def _is_stale_context_error(ret: Any, errcode: Any, errmsg: Any) -> bool:
+    """识别 iLink 将 context_token 过期伪装成 ret=-2 的场景。"""
+    try:
+        code = int(ret if ret not in (None, 0) else errcode)
+    except (TypeError, ValueError):
+        code = 0
+    if code != -2:
+        return False
+    msg = (errmsg or "").strip().lower()
+    return msg in ("", "unknown error", "invalid context token", "context token expired")
+
+
+def _load_config_file() -> dict:
+    try:
+        cfg_file = SCRIPT_DIR / "config.json"
+        if cfg_file.exists():
+            return json.loads(cfg_file.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _save_config_file(cfg: dict) -> None:
+    cfg_file = SCRIPT_DIR / "config.json"
+    tmp = cfg_file.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, cfg_file)
+
+
+def _update_config_field(key: str, value: Any) -> None:
+    try:
+        cfg = _load_config_file()
+        wx = cfg.setdefault("weixin", {})
+        if wx.get(key) == value:
+            return
+        wx[key] = value
+        _save_config_file(cfg)
+    except Exception as exc:
+        _log(f"[weixin] 更新 config.{key} 失败: {exc}")
+
+
+def _mark_session_timeout() -> None:
+    try:
+        cfg = _load_config_file()
+        wx = cfg.setdefault("weixin", {})
+        wx["enabled"] = False
+        wx["context_token"] = ""
+        wx["session_expired"] = True
+        _save_config_file(cfg)
+    except Exception:
+        pass
+    stop_keepalive()
 
 
 def _random_wechat_uin() -> str:
@@ -321,6 +394,149 @@ def _init_session_after_login(token: str, baseurl: str):
         _log(f"[weixin] getupdates 初始化异常: {e}")
 
 
+def start_keepalive() -> bool:
+    """启动微信后台 getupdates 轮询，由托盘进程持有。"""
+    global _keepalive_thread
+    with _keepalive_lock:
+        if _keepalive_thread and _keepalive_thread.is_alive():
+            return True
+        _keepalive_stop.clear()
+        _keepalive_thread = threading.Thread(target=_keepalive_loop, name="weixin-keepalive", daemon=True)
+        _keepalive_thread.start()
+        return True
+
+
+def stop_keepalive() -> None:
+    _keepalive_stop.set()
+
+
+def get_keepalive_status() -> Dict[str, Any]:
+    with _keepalive_lock:
+        return dict(_keepalive_status)
+
+
+def _keepalive_loop() -> None:
+    sync_buf = _load_config_file().get("weixin", {}).get("sync_buf", "")
+    failure_count = 0
+    _log("[weixin] 后台保活轮询启动")
+    with _keepalive_lock:
+        _keepalive_status.update({"running": True, "last_error": ""})
+
+    try:
+        while not _keepalive_stop.is_set():
+            cfg = _load_config_file()
+            wx = cfg.get("weixin", {})
+            if not wx.get("enabled") or not wx.get("bot_token"):
+                time.sleep(5)
+                continue
+
+            token = wx.get("bot_token", "")
+            baseurl = wx.get("baseurl", ILINK_BASE).rstrip("/")
+            body = json.dumps({
+                "get_updates_buf": sync_buf,
+                "base_info": {"channel_version": CHANNEL_VERSION},
+            }, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            headers = {
+                "Content-Type": "application/json",
+                "AuthorizationType": "ilink_bot_token",
+                "Authorization": f"Bearer {token}",
+                "X-WECHAT-UIN": _random_wechat_uin(),
+                "iLink-App-Id": "bot",
+                "iLink-App-ClientVersion": str((2 << 16) | (2 << 8) | 0),
+                "Content-Length": str(len(body)),
+            }
+            req = urllib.request.Request(
+                f"{baseurl}/ilink/bot/getupdates",
+                data=body,
+                headers=headers,
+                method="POST",
+            )
+
+            try:
+                resp = urllib.request.urlopen(req, timeout=40)
+                data = json.loads(resp.read().decode("utf-8", errors="replace"))
+                ret = data.get("ret", data.get("errcode", 0))
+                if ret == 0:
+                    failure_count = 0
+                    sync_buf = data.get("get_updates_buf", sync_buf) or sync_buf
+                    _persist_sync_buf(sync_buf)
+                    for msg in data.get("msgs", []):
+                        _handle_incoming_message(msg)
+                    with _keepalive_lock:
+                        _keepalive_status.update({"last_ok": time.time(), "last_error": ""})
+                elif ret == -14 or data.get("errcode") == -14:
+                    _log("[weixin] 后台轮询检测到 session 过期，需要重新扫码")
+                    _mark_session_timeout()
+                    return
+                elif ret == -2:
+                    _log("[weixin] 后台轮询 ret=-2，清空 sync_buf 后继续")
+                    sync_buf = ""
+                    _persist_sync_buf(sync_buf)
+                else:
+                    failure_count += 1
+                    with _keepalive_lock:
+                        _keepalive_status["last_error"] = f"ret={ret}"
+                    time.sleep(min(30, 2 ** min(failure_count, 5)))
+            except Exception as exc:
+                failure_count += 1
+                with _keepalive_lock:
+                    _keepalive_status["last_error"] = str(exc)
+                time.sleep(min(30, 2 ** min(failure_count, 5)) + random.random())
+    finally:
+        with _keepalive_lock:
+            _keepalive_status["running"] = False
+        _log("[weixin] 后台保活轮询退出")
+
+
+def _persist_sync_buf(sync_buf: str) -> None:
+    try:
+        cfg = _load_config_file()
+        wx = cfg.setdefault("weixin", {})
+        wx["sync_buf"] = sync_buf
+        _save_config_file(cfg)
+    except Exception:
+        pass
+
+
+def _handle_incoming_message(msg: dict) -> None:
+    ctx = msg.get("context_token", "")
+    if ctx:
+        _update_config_field("context_token", ctx)
+    from_user = msg.get("from_user_id", "")
+    if from_user:
+        _update_config_field("to_user_id", from_user)
+
+    text = _extract_text(msg)
+    if text:
+        _dispatch_interaction_reply(text)
+
+
+def _extract_text(msg: dict) -> str:
+    texts = []
+    for item in msg.get("item_list", []) or []:
+        text_item = item.get("text_item") or {}
+        if text_item.get("text"):
+            texts.append(str(text_item["text"]))
+    return "\n".join(texts).strip()
+
+
+def _dispatch_interaction_reply(text: str) -> None:
+    """由托盘常驻轮询直接接收用户回复，避免 hook 进程再开微信长轮询。"""
+    try:
+        import interaction
+        label, reply = interaction._extract_reply_parts(text)
+        pending = interaction.get_request_by_label(label) if label else interaction.get_latest_request()
+        if not pending:
+            return
+        if label and label.upper() != pending.get("label", "").upper():
+            return
+        request_id = pending.get("id", "")
+        if request_id:
+            interaction.write_response(request_id, reply, "weixin", label=pending.get("label", ""))
+    except Exception as exc:
+        _log(f"[weixin] 分发交互回复失败: {exc}")
+
+
 def _qr_login_loop():
     """完整的扫码登录循环"""
     max_retries = 3
@@ -375,8 +591,9 @@ def _qr_login_loop():
 
                 # 调用 getupdates 初始化 session 并获取 context_token
                 _init_session_after_login(bot_token, baseurl)
+                start_keepalive()
 
-                _log("[weixin] 登录成功（注意：session 不自动保活，长时间不用需重新扫码）")
+                _log("[weixin] 登录成功，后台保活已启动")
                 return
 
             elif status == "expired":
