@@ -22,13 +22,10 @@ from pathlib import Path
 SCRIPT_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from channels.windows_toast import WindowsToastChannel
-from channels.weixin import WeixinChannel
-from channels.qq import QQBotChannel
-from channels.telegram import TelegramChannel
-from channels.feishu import FeishuChannel
-from channels.dingtalk import DingTalkChannel
 from channels.text import sanitize_data, sanitize_text
+
+# Channel imports are deferred to collect_channels() to speed up hook cold-start.
+# Only the text utilities are needed at module level for sanitize_text/sanitize_data.
 
 CONFIG_FILE = SCRIPT_DIR / "config.json"
 
@@ -98,6 +95,16 @@ NOTIFY_HOOK_EVENTS = [
 ]
 
 
+def _find_python_exe() -> str | None:
+    """查找可用的 Python 解释器路径，找不到返回 None。"""
+    import shutil
+    for name in ("python", "python3"):
+        path = shutil.which(name)
+        if path:
+            return path
+    return None
+
+
 def _hook_bat_path() -> str:
     """返回 notify_hook.bat 的路径（Windows）或 notify.py 的路径（其他平台）"""
     if getattr(sys, "frozen", False):
@@ -108,12 +115,31 @@ def _hook_bat_path() -> str:
     return (SCRIPT_DIR / "notify.py").as_posix()
 
 
+def _get_hook_base_cmd() -> str:
+    """生成 hook 基础命令（不含 --type 等参数）。
+
+    当从 frozen EXE 运行时，优先使用 Python 直接调用 notify.py（~200ms），
+    跳过 PyInstaller --onefile 的解压开销（~3-5s）。找不到 Python 则回退到 EXE。
+    """
+    if sys.platform == "win32":
+        if getattr(sys, "frozen", False):
+            py = _find_python_exe()
+            if py:
+                script = SCRIPT_DIR / "notify.py"
+                if script.exists():
+                    return f'"{py}" "{script}"'
+            return f'"{Path(sys.executable).resolve()}"'
+        bat = SCRIPT_DIR / "notify_hook.bat"
+        if bat.exists():
+            return f'"{str(bat).replace(chr(47), chr(92))}"'
+        py = _find_python_exe()
+        return f'"{py}" "{SCRIPT_DIR / "notify.py"}"' if py else f'"{SCRIPT_DIR / "notify.py"}"'
+    return f"{PYTHON_EXE} {(SCRIPT_DIR / 'notify.py').as_posix()}"
+
+
 def hook_command(notify_type: str = "stop", extra_msg: str = "") -> str:
     """生成 hook 命令"""
-    if sys.platform == "win32":
-        cmd = f'"{_hook_bat_path()}" --type {notify_type}'
-    else:
-        cmd = f"{PYTHON_EXE} {(SCRIPT_DIR / 'notify.py').as_posix()} --type {notify_type}"
+    cmd = f'{_get_hook_base_cmd()} --type {notify_type}'
     if extra_msg:
         cmd += f' --message "{extra_msg}"'
     return cmd
@@ -121,15 +147,13 @@ def hook_command(notify_type: str = "stop", extra_msg: str = "") -> str:
 
 def stdin_hook_command(notify_type: str = "stop") -> str:
     """生成从 stdin 读取上下文的 hook 命令（适用于 PreToolUse 等）"""
-    if sys.platform == "win32":
-        return f'"{_hook_bat_path()}" --type {notify_type} --from-stdin'
-    return f"{PYTHON_EXE} {(SCRIPT_DIR / 'notify.py').as_posix()} --type {notify_type} --from-stdin"
+    return f'{_get_hook_base_cmd()} --type {notify_type} --from-stdin'
 
 
 def stdin_hook_env() -> dict:
     """返回 hook 命令的环境变量（非 Windows 时使用）"""
     if sys.platform == "win32":
-        return {}  # Windows 通过 .bat 设置 PYTHONUTF8=1
+        return {"PYTHONUTF8": "1"}
     return {"PYTHONUTF8": "1"}
 
 
@@ -179,7 +203,13 @@ def save_config(config: dict) -> None:
 
 
 def collect_channels(config: dict):
-    """收集所有已注册的通知渠道"""
+    """收集所有已注册的通知渠道（延迟导入，加速 hook 冷启动）"""
+    from channels.windows_toast import WindowsToastChannel
+    from channels.weixin import WeixinChannel
+    from channels.qq import QQBotChannel
+    from channels.telegram import TelegramChannel
+    from channels.feishu import FeishuChannel
+    from channels.dingtalk import DingTalkChannel
     return [
         WindowsToastChannel(config),
         WeixinChannel(config),
