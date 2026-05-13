@@ -61,6 +61,7 @@ def _should_delegate_to_notify() -> bool:
 def _ensure_runtime_dirs() -> None:
     (SCRIPT_DIR / "pending").mkdir(exist_ok=True)
     (SCRIPT_DIR / "responses").mkdir(exist_ok=True)
+    (SCRIPT_DIR / "send_queue").mkdir(exist_ok=True)
 
 
 def _acquire_single_instance() -> bool:
@@ -106,14 +107,14 @@ def _run_tray() -> None:
         pystray.MenuItem("打开主界面", lambda icon, item: _open_ui()),
         pystray.MenuItem("通知源管理", pystray.Menu(*source_items)),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("安装所有 Hook", lambda icon, item: _install_hooks()),
-        pystray.MenuItem("卸载所有 Hook", lambda icon, item: _uninstall_hooks()),
+        pystray.MenuItem("安装所有 Hook", lambda icon, item: threading.Thread(target=_install_hooks, daemon=True).start()),
+        pystray.MenuItem("卸载所有 Hook", lambda icon, item: threading.Thread(target=_uninstall_hooks, daemon=True).start()),
         pystray.MenuItem(
             "开机自启动",
             lambda icon, item: _toggle_startup(icon),
             checked=lambda item: _is_startup_enabled(),
         ),
-        pystray.MenuItem("检查更新", lambda icon, item: _check_updates()),
+        pystray.MenuItem("检查更新", lambda icon, item: threading.Thread(target=_check_updates, daemon=True).start()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("退出托盘程序", lambda icon, item: _quit(icon)),
     )
@@ -367,6 +368,16 @@ def _cleanup_runtime_files() -> None:
         if folder.name == "responses":
             for path in folder.glob("*.json"):
                 _safe_unlink(path, now, max_age)
+    # 清理微信发送队列中的过期文件
+    send_queue = SCRIPT_DIR / "send_queue"
+    if send_queue.exists():
+        for path in send_queue.glob("*"):
+            _safe_unlink(path, now, 120)
+        try:
+            if not any(send_queue.iterdir()):
+                send_queue.rmdir()
+        except Exception:
+            pass
     _trim_log(SCRIPT_DIR / "notify.log", max_lines=1200)
 
 

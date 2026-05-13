@@ -32,6 +32,9 @@ ILINK_BASE = "https://ilinkai.weixin.qq.com"
 # iLink API 常量（与 Hermes Agent 保持一致）
 CHANNEL_VERSION = "2.2.0"
 
+# 发送队列目录（用于跨进程 IPC，解决 iLink 协议会话绑定问题）
+SEND_QUEUE_DIR = SCRIPT_DIR / "send_queue"
+
 
 # 全局登录状态（线程安全）
 _login_state = {
@@ -72,11 +75,14 @@ class WeixinChannel(NotificationChannel):
         return self._wx_config.get("enabled", False)
 
     def send(self, title: str, message: str) -> bool:
-        """通过 ilink Bot API 发送微信消息"""
+        """通过 ilink Bot API 发送微信消息。
+
+        当 keepalive 轮询正在运行时，消息通过文件队列转发给 keepalive 进程发送，
+        避免跨进程 HTTP 连接导致 iLink 协议 ret=-2 拒绝。
+        当 keepalive 未运行时，回退到直接发送。
+        """
         bot_token = self._wx_config.get("bot_token", "")
-        baseurl = self._wx_config.get("baseurl", ILINK_BASE).rstrip("/")
         to_user_id = self._wx_config.get("to_user_id", "")
-        context_token = self._wx_config.get("context_token", "")
 
         if not bot_token:
             _log("[weixin] send 失败: bot_token 为空，请重新扫码登录")
@@ -85,115 +91,15 @@ class WeixinChannel(NotificationChannel):
             _log("[weixin] send 跳过: to_user_id 为空，请先在微信上给 bot 发一条消息以自动获取")
             return False
 
-        full_text = sanitize_text(f"【{title}】\n{message}")
+        # 优先通过队列发送（keepalive 进程内执行，保持会话绑定一致）
+        if _is_keepalive_running():
+            msg_id = _enqueue_message(title, message)
+            _log(f"[weixin] 消息已入队: {msg_id}")
+            return _wait_for_send_result(msg_id)
 
-        import time as _time
-        client_id = f"claude-notify:{int(_time.time()*1000)}-{random.randbytes(4).hex()}"
-
-        def _build_body(with_ctx: bool) -> bytes:
-            msg = {
-                "from_user_id": "",
-                "to_user_id": to_user_id,
-                "client_id": client_id,
-                "message_type": 2,
-                "message_state": 2,
-                "item_list": [
-                    {
-                        "type": 1,
-                        "text_item": {"text": full_text}
-                    }
-                ],
-            }
-            if with_ctx and context_token:
-                msg["context_token"] = context_token
-            return json.dumps({
-                "msg": msg,
-                "base_info": {
-                    "channel_version": CHANNEL_VERSION,
-                }
-            }, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-
-        url = f"{baseurl}/ilink/bot/sendmessage"
-
-        def _do_send(body: bytes) -> dict:
-            """
-            发送请求，返回解析后的 API 响应 dict。
-            - 成功: {"ok": True}
-            - errcode=-14: {"ok": False, "reason": "session_timeout"}
-            - 其他错误: {"ok": False, "reason": "api_error"}
-            - 网络异常: {"ok": False, "reason": "network_error"}
-            """
-            headers = {
-                "Content-Type": "application/json",
-                "AuthorizationType": "ilink_bot_token",
-                "Authorization": f"Bearer {bot_token}",
-                "X-WECHAT-UIN": _random_wechat_uin(),
-                "iLink-App-Id": "bot",
-                "iLink-App-ClientVersion": str((2 << 16) | (2 << 8) | 0),
-                "Content-Length": str(len(body)),
-            }
-            _log(f"[weixin] 请求头: {json.dumps({k: v for k, v in headers.items() if k != 'Authorization'}, ensure_ascii=False)}")
-            req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-            try:
-                resp = urllib.request.urlopen(req, timeout=15)
-                resp_body = resp.read().decode("utf-8", errors="replace")
-                _log(f"[weixin] HTTP {resp.status} | 响应: {resp_body[:300]}")
-                if 200 <= resp.status < 300:
-                    try:
-                        result = json.loads(resp_body)
-                        ret = result.get("ret", 0)
-                        errcode = result.get("errcode", 0)
-                        if ret != 0 or errcode != 0:
-                            if errcode == -14 or ret == -14:
-                                return {"ok": False, "reason": "session_timeout"}
-                            _log(f"[weixin] API 错误 ret={ret} errcode={errcode} errmsg={result.get('errmsg', '')}")
-                            if _is_stale_context_error(ret, errcode, result.get("errmsg", "")):
-                                return {"ok": False, "reason": "stale_context"}
-                            return {"ok": False, "reason": "api_error"}
-                    except (json.JSONDecodeError, AttributeError):
-                        pass
-                    return {"ok": True}
-                return {"ok": False, "reason": "api_error"}
-            except urllib.error.HTTPError as e:
-                resp_body = e.read().decode("utf-8", errors="replace") if e.fp else ""
-                _log(f"[weixin] HTTPError {e.code} | 响应: {resp_body[:300]}")
-                return {"ok": False, "reason": "network_error"}
-            except urllib.error.URLError as e:
-                _log(f"[weixin] URLError: {e.reason}")
-                return {"ok": False, "reason": "network_error"}
-            except Exception as e:
-                _log(f"[weixin] 异常: {e}")
-                return {"ok": False, "reason": "network_error"}
-
-        # 第一次发送（带 context_token）
-        body = _build_body(with_ctx=True)
-        _log(f"[weixin] POST {url} to_user={to_user_id} ctx={'yes' if context_token else 'no'}")
-        _log(f"[weixin] 请求体: {body.decode('utf-8', errors='replace')[:500]}")
-        result = _do_send(body)
-
-        if result["ok"]:
-            return True
-
-        # errcode=-14: bot session 过期
-        # 不带 context_token 重试仍会失败，需要重新登录
-        if result["reason"] == "session_timeout":
-            _log("[weixin] bot session 过期 (errcode=-14)，请在 Web UI 重新扫码登录后继续使用")
-            _mark_session_timeout()
-            return False
-
-        # context_token 过期或其他可恢复错误：剥离 context_token 降级重试一次
-        if context_token:
-            if result["reason"] == "stale_context":
-                _log("[weixin] context_token 已过期，清空本地 token 并执行 tokenless fallback")
-                _update_config_field("context_token", "")
-            else:
-                _log("[weixin] 发送失败，尝试不带 context_token 重试")
-            body = _build_body(with_ctx=False)
-            _log(f"[weixin] 重试请求体: {body.decode('utf-8', errors='replace')[:500]}")
-            result = _do_send(body)
-            return result["ok"]
-
-        return False
+        # 回退：keepalive 未运行时直接发送
+        _log("[weixin] keepalive 未运行，回退到直接发送")
+        return _direct_send(self._wx_config, title, message)
 
     @staticmethod
     def get_login_status(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -306,6 +212,202 @@ def _random_wechat_uin() -> str:
     """生成随机的 X-WECHAT-UIN 头"""
     uint32 = random.randint(0, 2**32 - 1)
     return base64.b64encode(str(uint32).encode("utf-8")).decode("utf-8")
+
+
+def _enqueue_message(title: str, message: str) -> str:
+    """将消息写入文件队列，返回消息 ID。由 notify 进程调用。"""
+    SEND_QUEUE_DIR.mkdir(exist_ok=True)
+    msg_id = f"{int(time.time() * 1000)}-{random.randbytes(4).hex()}"
+    queue_file = SEND_QUEUE_DIR / f"{msg_id}.json"
+    payload = {
+        "id": msg_id,
+        "title": title,
+        "message": message,
+        "ts": time.time(),
+        "status": "pending",
+        "result": None,
+    }
+    tmp = queue_file.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, queue_file)
+    return msg_id
+
+
+def _wait_for_send_result(msg_id: str, timeout: float = 30.0) -> bool:
+    """轮询等待 keepalive 进程处理结果。由 notify 进程调用。"""
+    queue_file = SEND_QUEUE_DIR / f"{msg_id}.json"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            data = json.loads(queue_file.read_text(encoding="utf-8"))
+            if data.get("status") == "done":
+                # 清理队列文件
+                try:
+                    queue_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return bool(data.get("result"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return False
+        time.sleep(0.3)
+    return False
+
+
+def _is_keepalive_running() -> bool:
+    """检查 keepalive 轮询是否正在运行（同进程或跨进程）。"""
+    # 同进程检查
+    with _keepalive_lock:
+        if _keepalive_status.get("running"):
+            return True
+    # 跨进程检查：通过 heartbeat 文件判断托盘进程是否存活
+    try:
+        hb_file = SCRIPT_DIR / "tray_heartbeat.json"
+        if hb_file.exists():
+            hb = json.loads(hb_file.read_text(encoding="utf-8"))
+            if hb.get("weixin_keepalive") and time.time() - hb.get("ts", 0) < 30:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _direct_send(wx_config: dict, title: str, message: str) -> bool:
+    """直接发送微信消息（回退模式，用于 keepalive 未运行时）。"""
+    bot_token = wx_config.get("bot_token", "")
+    baseurl = wx_config.get("baseurl", ILINK_BASE).rstrip("/")
+    to_user_id = wx_config.get("to_user_id", "")
+    context_token = wx_config.get("context_token", "")
+
+    full_text = sanitize_text(f"【{title}】\n{message}")
+    client_id = f"claude-notify:{int(time.time() * 1000)}-{random.randbytes(4).hex()}"
+
+    def _build_body(with_ctx: bool) -> bytes:
+        msg = {
+            "from_user_id": "",
+            "to_user_id": to_user_id,
+            "client_id": client_id,
+            "message_type": 2,
+            "message_state": 2,
+            "item_list": [{"type": 1, "text_item": {"text": full_text}}],
+        }
+        if with_ctx and context_token:
+            msg["context_token"] = context_token
+        return json.dumps({
+            "msg": msg,
+            "base_info": {"channel_version": CHANNEL_VERSION},
+        }, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+    url = f"{baseurl}/ilink/bot/sendmessage"
+
+    def _do_send(body: bytes) -> dict:
+        headers = {
+            "Content-Type": "application/json",
+            "AuthorizationType": "ilink_bot_token",
+            "Authorization": f"Bearer {bot_token}",
+            "X-WECHAT-UIN": _random_wechat_uin(),
+            "iLink-App-Id": "bot",
+            "iLink-App-ClientVersion": str((2 << 16) | (2 << 8) | 0),
+            "Content-Length": str(len(body)),
+        }
+        _log(f"[weixin] 请求头: {json.dumps({k: v for k, v in headers.items() if k != 'Authorization'}, ensure_ascii=False)}")
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        try:
+            resp = urllib.request.urlopen(req, timeout=15)
+            resp_body = resp.read().decode("utf-8", errors="replace")
+            _log(f"[weixin] HTTP {resp.status} | 响应: {resp_body[:300]}")
+            if 200 <= resp.status < 300:
+                try:
+                    result = json.loads(resp_body)
+                    ret = result.get("ret", 0)
+                    errcode = result.get("errcode", 0)
+                    if ret != 0 or errcode != 0:
+                        if errcode == -14 or ret == -14:
+                            return {"ok": False, "reason": "session_timeout"}
+                        _log(f"[weixin] API 错误 ret={ret} errcode={errcode} errmsg={result.get('errmsg', '')}")
+                        if _is_stale_context_error(ret, errcode, result.get("errmsg", "")):
+                            return {"ok": False, "reason": "stale_context"}
+                        return {"ok": False, "reason": "api_error"}
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+                return {"ok": True}
+            return {"ok": False, "reason": "api_error"}
+        except urllib.error.HTTPError as e:
+            resp_body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+            _log(f"[weixin] HTTPError {e.code} | 响应: {resp_body[:300]}")
+            return {"ok": False, "reason": "network_error"}
+        except urllib.error.URLError as e:
+            _log(f"[weixin] URLError: {e.reason}")
+            return {"ok": False, "reason": "network_error"}
+        except Exception as e:
+            _log(f"[weixin] 异常: {e}")
+            return {"ok": False, "reason": "network_error"}
+
+    # 第一次发送（带 context_token）
+    body = _build_body(with_ctx=True)
+    _log(f"[weixin] POST {url} to_user={to_user_id} ctx={'yes' if context_token else 'no'}")
+    _log(f"[weixin] 请求体: {body.decode('utf-8', errors='replace')[:500]}")
+    result = _do_send(body)
+
+    if result["ok"]:
+        return True
+
+    if result["reason"] == "session_timeout":
+        _log("[weixin] bot session 过期 (errcode=-14)，请在 Web UI 重新扫码登录后继续使用")
+        _mark_session_timeout()
+        return False
+
+    # context_token 过期或其他可恢复错误：剥离 context_token 降级重试一次
+    if context_token:
+        if result["reason"] == "stale_context":
+            _log("[weixin] context_token 已过期，清空本地 token 并执行 tokenless fallback")
+            _update_config_field("context_token", "")
+        else:
+            _log("[weixin] 发送失败，尝试不带 context_token 重试")
+        body = _build_body(with_ctx=False)
+        _log(f"[weixin] 重试请求体: {body.decode('utf-8', errors='replace')[:500]}")
+        result = _do_send(body)
+        return result["ok"]
+
+    return False
+
+
+def _process_send_queue(do_send_func) -> None:
+    """处理发送队列中的 pending 消息。在 keepalive 进程内调用。"""
+    if not SEND_QUEUE_DIR.exists():
+        return
+    for queue_file in sorted(SEND_QUEUE_DIR.glob("*.json")):
+        if queue_file.suffix == ".tmp":
+            continue
+        try:
+            data = json.loads(queue_file.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
+        if data.get("status") != "pending":
+            continue
+        # 超过 60 秒的队列消息视为过期
+        if time.time() - data.get("ts", 0) > 60:
+            _log(f"[weixin] 队列消息 {data.get('id', '?')} 已过期，丢弃")
+            try:
+                queue_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+            continue
+        title = data.get("title", "")
+        message = data.get("message", "")
+        _log(f"[weixin] 处理队列消息: {title[:30]}")
+        ok = do_send_func(title, message)
+        data["status"] = "done"
+        data["result"] = ok
+        tmp = queue_file.with_suffix(".json.tmp")
+        try:
+            tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, queue_file)
+        except Exception as exc:
+            _log(f"[weixin] 写回队列结果失败: {exc}")
+        if ok:
+            _log(f"[weixin] 队列消息发送成功: {title[:30]}")
+        else:
+            _log(f"[weixin] 队列消息发送失败: {title[:30]}")
 
 
 def _fetch_qr_code() -> Dict[str, Any]:
@@ -427,8 +529,12 @@ def _keepalive_loop() -> None:
             cfg = _load_config_file()
             wx = cfg.get("weixin", {})
             if not wx.get("enabled") or not wx.get("bot_token"):
+                # 即使微信未启用，也处理队列中的消息（可能刚启用）
                 time.sleep(5)
                 continue
+
+            # 处理发送队列（在同一进程内发送，保持会话绑定一致）
+            _process_send_queue(lambda t, m: _direct_send(wx, t, m))
 
             token = wx.get("bot_token", "")
             baseurl = wx.get("baseurl", ILINK_BASE).rstrip("/")
