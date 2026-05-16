@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ctypes
+import ctypes.wintypes
 import json
 import os
 import ssl  # 提前导入，避免 PyInstaller --onefile 下 urllib 运行时从 base_library.zip 加载失败
@@ -14,11 +15,12 @@ import threading
 import time
 import urllib.request
 import webbrowser
+import winreg
 from pathlib import Path
 from typing import Any
 
 APP_NAME = "ClaudeBeep"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 SCRIPT_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", SCRIPT_DIR))
 CONFIG_FILE = SCRIPT_DIR / "config.json"
@@ -37,6 +39,76 @@ CHANNEL_LABELS = {
 _mutex_handle = None
 _ui_process: subprocess.Popen | None = None
 _stop_event = threading.Event()
+
+# uxtheme dark mode APIs (Windows 10 1903+)
+_uxtheme = ctypes.windll.uxtheme
+_SetPreferredAppMode = _uxtheme[135]
+_FlushMenuThemes = _uxtheme[136]
+DARK_MODE = 1
+
+
+def _is_system_dark_mode() -> bool:
+    """Check if Windows system is using dark mode for apps."""
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+        )
+        value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+        winreg.CloseKey(key)
+        return value == 0
+    except Exception:
+        return False
+
+
+def _apply_dark_mode_to_hwnd(hwnd):
+    """Apply immersive dark mode to a window via DWM API."""
+    try:
+        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            ctypes.byref(ctypes.c_int(1)),
+            ctypes.sizeof(ctypes.c_int),
+        )
+    except Exception:
+        pass
+
+
+def _enable_dark_mode():
+    """Enable dark mode for the app — must be called before UI creation."""
+    try:
+        _SetPreferredAppMode(DARK_MODE)
+        _FlushMenuThemes()
+    except Exception:
+        pass
+
+
+def _patch_menu_for_dark_mode(icon):
+    """Apply dark mode to popup menus."""
+    if not _is_system_dark_mode():
+        return
+    try:
+        impl = icon._impl
+        if hasattr(impl, '_hwnd') and impl._hwnd:
+            _apply_dark_mode_to_hwnd(impl._hwnd)
+        if hasattr(impl, '_menu_hwnd') and impl._menu_hwnd:
+            _apply_dark_mode_to_hwnd(impl._menu_hwnd)
+
+        if hasattr(impl, '_on_notify'):
+            original_on_notify = impl._on_notify
+            WM_RBUTTONUP = 0x0205
+
+            def _dark_on_notify(wparam, lparam):
+                if lparam == WM_RBUTTONUP:
+                    _enable_dark_mode()
+                    if impl._menu_hwnd:
+                        _apply_dark_mode_to_hwnd(impl._menu_hwnd)
+                return original_on_notify(wparam, lparam)
+
+            impl._on_notify = _dark_on_notify
+    except Exception:
+        pass
 
 
 def main() -> None:
@@ -94,6 +166,8 @@ def _run_tray() -> None:
         _message_box(f"托盘依赖缺失：{exc}", APP_NAME, 0x10)
         return
 
+    _enable_dark_mode()
+
     image = Image.open(ICON_FILE if ICON_FILE.exists() else RESOURCE_DIR / "assets" / "icon.png")
     source_items = []
     for name, label in CHANNEL_LABELS.items():
@@ -117,10 +191,11 @@ def _run_tray() -> None:
         ),
         pystray.MenuItem("检查更新", lambda icon, item: threading.Thread(target=_check_updates, daemon=True).start()),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("退出托盘程序", lambda icon, item: _quit(icon)),
+        pystray.MenuItem(f"退出 (v{APP_VERSION})", lambda icon, item: _quit(icon)),
     )
 
-    icon = pystray.Icon(APP_NAME, image, APP_NAME, menu)
+    icon = pystray.Icon(APP_NAME, image, f"{APP_NAME} v{APP_VERSION}", menu)
+    _patch_menu_for_dark_mode(icon)
     threading.Thread(target=_menu_refresh_loop, args=(icon,), name="menu-refresh", daemon=True).start()
     icon.run()
 
@@ -301,52 +376,29 @@ def _toggle_startup(icon: Any = None) -> None:
 
 
 def _check_updates() -> None:
-    cfg = _load_config()
-    repo = cfg.get("app", {}).get("update_repo", "Tommie-P-xl/ClaudeBeep")
+    import updater
     try:
-        req = urllib.request.Request(
-            f"https://api.github.com/repos/{repo}/releases/latest",
-            headers={"User-Agent": f"{APP_NAME}/{APP_VERSION}"},
-        )
-        data = json.loads(urllib.request.urlopen(req, timeout=15).read().decode("utf-8"))
-        latest = str(data.get("tag_name", "")).lstrip("v")
-        if not latest or _version_tuple(latest) <= _version_tuple(APP_VERSION):
+        info = updater.check_for_update(APP_VERSION)
+        if not info:
             _message_box("当前已是最新版本。", APP_NAME, 0x40)
             return
-        if _message_box(f"检测到新版本 {latest}，是否现在安装？", APP_NAME, 0x24) != 6:
+        if _message_box(f"检测到新版本 {info['version']}，是否现在安装？", APP_NAME, 0x24) != 6:
             return
-        asset = _select_windows_asset(data.get("assets", []))
-        if not asset:
-            webbrowser.open(data.get("html_url", f"https://github.com/{repo}/releases/latest"))
-            return
-        _download_and_run_installer(asset["browser_download_url"], asset["name"])
+        if info.get("url"):
+            success = updater.perform_update(info["url"])
+            if success:
+                _quit_tray()
+            else:
+                _message_box("自动更新失败，正在打开下载页面...", APP_NAME, 0x10)
+                webbrowser.open(f"https://github.com/{updater.GITHUB_OWNER}/{updater.GITHUB_REPO}/releases/latest")
+        else:
+            webbrowser.open(f"https://github.com/{updater.GITHUB_OWNER}/{updater.GITHUB_REPO}/releases/latest")
     except Exception as exc:
         _message_box(f"检查更新失败：\n{exc}", APP_NAME, 0x10)
 
 
-def _version_tuple(value: str) -> tuple[int, ...]:
-    parts = []
-    for part in value.split("."):
-        try:
-            parts.append(int("".join(ch for ch in part if ch.isdigit()) or "0"))
-        except ValueError:
-            parts.append(0)
-    return tuple(parts)
-
-
-def _select_windows_asset(assets: list[dict[str, Any]]) -> dict[str, Any] | None:
-    for asset in assets:
-        name = asset.get("name", "").lower()
-        if name.endswith((".exe", ".msi")) and ("windows" in name or "setup" in name or "claudebeep" in name):
-            return asset
-    return None
-
-
-def _download_and_run_installer(url: str, name: str) -> None:
-    dest = Path(tempfile.gettempdir()) / name
-    urllib.request.urlretrieve(url, dest)
-    subprocess.Popen([str(dest)], cwd=str(dest.parent), creationflags=_creationflags())
-    _message_box("安装程序已启动，ClaudeBeep 将退出。", APP_NAME, 0x40)
+def _quit_tray() -> None:
+    _stop_event.set()
     os._exit(0)
 
 
