@@ -2,7 +2,7 @@
 
 ClaudeBeep 是一个 Windows 系统托盘应用，为 [Claude Code](https://claude.ai/code) 提供多渠道通知和交互式审批回复。它将原有的 Python hook 工作流打包为单个可安装桌面应用 —— 一次安装，所有操作从系统托盘管理，仅在需要详细配置时打开 Web UI。
 
-**版本：** `1.0.1`
+**版本：** `1.0.2`
 
 ## 功能
 
@@ -12,7 +12,8 @@ ClaudeBeep 是一个 Windows 系统托盘应用，为 [Claude Code](https://clau
 - **通知源管理** — 可展开的子菜单。已配置的通知源启用时显示对号；未配置的通知源置灰，无法勾选。
 - **安装/卸载所有 Hooks** — 在 `~/.claude/settings.json` 中注册或移除 Claude Code hook 条目。
 - **开机自启动** — 通过 Windows 注册表（`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`）切换开机自启。
-- **检查更新** — 查询 GitHub Releases 最新版本；如有新版，直接下载安装包覆盖安装（无需卸载）。
+- **检查更新** — 查询 GitHub Releases 最新版本；如有新版，通过批处理脚本自动下载并替换 exe（带重试机制，无需卸载）。若自动更新失败，回退到打开下载页面。
+- **系统深色模式** — 自动检测 Windows 系统主题，为托盘菜单和弹出菜单应用深色模式样式。
 - **退出** — 停止所有后台服务并退出。
 
 ### 通知渠道
@@ -146,8 +147,8 @@ python notify.py --test        # 测试所有已启用渠道
 推送版本标签触发 GitHub Actions 工作流：
 
 ```
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.2
+git push origin v1.0.2
 ```
 
 工作流步骤：
@@ -163,7 +164,7 @@ git push origin v1.0.0
 ```json
 {
   "app": {
-    "version": "1.0.0",
+    "version": "1.0.2",
     "auto_cleanup": true,
     "cleanup_interval_hours": 12,
     "update_repo": "Tommie-P-xl/ClaudeBeep"

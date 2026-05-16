@@ -2,7 +2,7 @@
 
 ClaudeBeep is a Windows system tray application that brings multi-channel notifications and interactive approval replies to [Claude Code](https://claude.ai/code). It packages the original Python hook workflow as a single installable desktop application — install once, manage everything from the system tray, and open the full Web UI only when detailed configuration is needed.
 
-**Version:** `1.0.1`
+**Version:** `1.0.2`
 
 ## Features
 
@@ -12,7 +12,8 @@ ClaudeBeep is a Windows system tray application that brings multi-channel notifi
 - **Notification Sources** — expandable submenu. Configured sources show a checkmark when enabled; unconfigured sources are greyed out and cannot be toggled.
 - **Install / Uninstall All Hooks** — registers or removes Claude Code hook entries in `~/.claude/settings.json`.
 - **Start with Windows** — toggles per-user auto-start via the Windows registry (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`).
-- **Check for Updates** — queries GitHub Releases for the latest version; if newer, downloads and runs the installer in-place (no uninstall required).
+- **Check for Updates** — queries GitHub Releases for the latest version; if newer, downloads and replaces the exe in-place via a batch script with retry logic (no uninstall required). Falls back to opening the download page if auto-update fails.
+- **System Dark Mode** — automatically detects the Windows system theme and applies dark mode styling to the tray menu and popup menus.
 - **Quit** — stops all background services and exits.
 
 ### Notification Channels
@@ -146,8 +147,8 @@ This creates `dist/ClaudeBeep.exe` (single-file, windowed, UPX-compressed).
 Pushing a version tag triggers the GitHub Actions workflow:
 
 ```
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.2
+git push origin v1.0.2
 ```
 
 The workflow:
@@ -163,7 +164,7 @@ The workflow:
 ```json
 {
   "app": {
-    "version": "1.0.0",
+    "version": "1.0.2",
     "auto_cleanup": true,
     "cleanup_interval_hours": 12,
     "update_repo": "Tommie-P-xl/ClaudeBeep"
