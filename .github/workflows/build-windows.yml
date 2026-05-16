@@ -46,3 +46,21 @@ jobs:
           files: |
             dist/ClaudeBeep.exe
             Output/ClaudeBeep-Setup-*.exe
+
+      - name: Upload latest.json
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart("v")
+          $owner = "${{ github.repository_owner }}"
+          $repo = "ClaudeBeep"
+          $json = @{
+            version = $version
+            notes   = "Release $tag"
+            url     = "https://github.com/$owner/$repo/releases/download/$tag/ClaudeBeep.exe"
+          } | ConvertTo-Json -Depth 3
+          Set-Content -Path "latest.json" -Value $json -Encoding UTF8
+          gh release upload $tag latest.json --clobber
